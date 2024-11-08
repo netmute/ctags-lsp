@@ -467,28 +467,76 @@ func handleCompletion(server *Server, req RPCRequest) {
 		return
 	}
 
+	currentFilePath := uriToPath(params.TextDocument.URI)
+	currentFileExt := filepath.Ext(currentFilePath)
+
+	// Get the line content and check if the character before the cursor is a dot
+	server.cache.mu.RLock()
+	lines, ok := server.cache.content[currentFilePath]
+	server.cache.mu.RUnlock()
+
+	if !ok || params.Position.Line >= len(lines) {
+		sendError(req.ID, -32603, "Internal error", "Line out of range")
+		return
+	}
+
+	lineContent := lines[params.Position.Line]
+	runes := []rune(lineContent)
+	isAfterDot := false
+	if params.Position.Character > 0 && params.Position.Character-1 < len(runes) {
+		prevChar := runes[params.Position.Character-1]
+		isAfterDot = prevChar == '.'
+	}
+
 	// Retrieve the current word at the cursor position
 	word := server.getCurrentWord(params.TextDocument.URI, params.Position)
-	var items []CompletionItem
 
+	var items []CompletionItem
 	seenItems := make(map[string]bool)
+
 	for _, entry := range server.tagEntries {
 		if strings.HasPrefix(strings.ToLower(entry.Name), strings.ToLower(word)) {
 			if seenItems[entry.Name] {
 				continue // Avoid duplicate entries
 			}
-			seenItems[entry.Name] = true
 
 			kind := GetLSPCompletionKind(entry.Kind)
-			items = append(items, CompletionItem{
-				Label:  entry.Name,
-				Kind:   kind,
-				Detail: fmt.Sprintf("%s (%s)", entry.Path, entry.Kind),
-				Documentation: &MarkupContent{
-					Kind:  "plaintext",
-					Value: entry.Pattern,
-				},
-			})
+
+			// Get the file extension of the entry's file
+			entryFilePath := filepath.Join(server.rootPath, entry.Path)
+			entryFileExt := filepath.Ext(entryFilePath)
+
+			// Decide whether to include this entry
+			includeEntry := false
+
+			if isAfterDot {
+				// After a dot, only include methods and functions, excluding 'text' items
+				if (kind == CompletionItemKindMethod || kind == CompletionItemKindFunction) && entryFileExt == currentFileExt {
+					includeEntry = true
+				}
+			} else {
+				// Not after a dot
+				if kind == CompletionItemKindText {
+					// Always include 'text' items
+					includeEntry = true
+				} else if entryFileExt == currentFileExt {
+					// Include items from files with the same extension
+					includeEntry = true
+				}
+			}
+
+			if includeEntry {
+				seenItems[entry.Name] = true
+				items = append(items, CompletionItem{
+					Label:  entry.Name,
+					Kind:   kind,
+					Detail: fmt.Sprintf("%s (%s)", entry.Path, entry.Kind),
+					Documentation: &MarkupContent{
+						Kind:  "plaintext",
+						Value: entry.Pattern,
+					},
+				})
+			}
 		}
 	}
 
@@ -638,18 +686,19 @@ func (s *Server) getCurrentWord(uri string, pos Position) string {
 	}
 
 	line := lines[pos.Line]
-	if pos.Character > len(line) {
+	runes := []rune(line)
+	if pos.Character > len(runes) {
 		return ""
 	}
 
 	// Find word boundaries
 	start := pos.Character
-	for start > 0 && isIdentifierChar(rune(line[start-1])) {
+	for start > 0 && isIdentifierChar(runes[start-1]) {
 		start--
 	}
 
 	end := pos.Character
-	for end < len(line) && isIdentifierChar(rune(line[end])) {
+	for end < len(runes) && isIdentifierChar(runes[end]) {
 		end++
 	}
 
@@ -657,7 +706,7 @@ func (s *Server) getCurrentWord(uri string, pos Position) string {
 		return ""
 	}
 
-	return line[start:end]
+	return string(runes[start:end])
 }
 
 // isIdentifierChar checks if a rune is a valid identifier character
