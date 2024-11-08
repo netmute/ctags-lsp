@@ -7,12 +7,42 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
+)
+
+// LSP Completion Item Kind Constants
+const (
+	CompletionItemKindText          = 1
+	CompletionItemKindMethod        = 2
+	CompletionItemKindFunction      = 3
+	CompletionItemKindConstructor   = 4
+	CompletionItemKindField         = 5
+	CompletionItemKindVariable      = 6
+	CompletionItemKindClass         = 7
+	CompletionItemKindInterface     = 8
+	CompletionItemKindModule        = 9
+	CompletionItemKindProperty      = 10
+	CompletionItemKindUnit          = 11
+	CompletionItemKindValue         = 12
+	CompletionItemKindEnum          = 13
+	CompletionItemKindKeyword       = 14
+	CompletionItemKindSnippet       = 15
+	CompletionItemKindColor         = 16
+	CompletionItemKindFile          = 17
+	CompletionItemKindReference     = 18
+	CompletionItemKindFolder        = 19
+	CompletionItemKindEnumMember    = 20
+	CompletionItemKindConstant      = 21
+	CompletionItemKindStruct        = 22
+	CompletionItemKindEvent         = 23
+	CompletionItemKindOperator      = 24
+	CompletionItemKindTypeParameter = 25
 )
 
 // RPCRequest represents a JSON-RPC request structure
@@ -171,7 +201,6 @@ type Range struct {
 type Server struct {
 	tagEntries []TagEntry
 	rootPath   string
-	tagsFile   string
 	cache      FileCache
 	mu         sync.Mutex
 }
@@ -182,72 +211,47 @@ type FileCache struct {
 	content map[string][]string
 }
 
-// TagEntry represents a single ctags entry
+// TagEntry represents a single ctags JSON entry
 type TagEntry struct {
-	Name     string
-	Path     string
-	Pattern  string
-	Line     int
-	Kind     string
-	Language string
+	Type      string `json:"_type"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Pattern   string `json:"pattern"`
+	Kind      string `json:"kind"`
+	Scope     string `json:"scope,omitempty"`
+	ScopeKind string `json:"scopeKind,omitempty"`
+	TypeRef   string `json:"typeref,omitempty"`
+	Language  string `json:"language,omitempty"`
+	Line      int    `json:"line,omitempty"`
 }
 
-// kindMap maps single-letter ctags kind codes to full kind names
-var kindMap = map[string]string{
-	// Lowercase letters
-	"a": "alias",
-	"b": "block",
-	"c": "class",
-	"d": "define",
-	"e": "enum",
-	"f": "function",
-	"g": "enum", // General enum
-	"h": "header",
-	"i": "interface",
-	"k": "constant", // 'k' is less common; mapping to 'constant' from Pascal
-	"l": "local",    // Local variable or label
-	"m": "method",   // Method or member
-	"n": "namespace",
-	"o": "operator",
-	"p": "package",
-	"q": "unknown", // 'q' is rare; set as 'unknown'
-	"r": "record",
-	"s": "struct",
-	"t": "type",
-	"u": "union",
-	"v": "variable",
-	"w": "unknown", // 'w' is rare; set as 'unknown'
-	"x": "externvar",
-	"y": "unknown", // 'y' is rare; set as 'unknown'
-	"z": "parameter",
-
-	// Uppercase letters
-	"A": "annotation",
-	"B": "block",
-	"C": "class",
-	"D": "define",
-	"E": "enum",
-	"F": "function",
-	"G": "enum",
-	"H": "header",
-	"I": "interface",
-	"J": "unknown",
-	"K": "package",
-	"L": "label",
-	"M": "module",
-	"N": "namespace",
-	"O": "operator",
-	"P": "package",
-	"Q": "unknown",
-	"R": "record",
-	"S": "struct",
-	"T": "type",
-	"U": "unknown",
-	"V": "variable",
-	"W": "unknown",
-	"X": "unknown",
-	"Y": "unknown",
-	"Z": "unknown",
+// kindMap maps ctags kind strings to LSP completion item kinds using constants
+var kindMap = map[string]int{
+	"function":   CompletionItemKindFunction,
+	"method":     CompletionItemKindMethod,
+	"class":      CompletionItemKindClass,
+	"struct":     CompletionItemKindStruct,
+	"variable":   CompletionItemKindVariable,
+	"constant":   CompletionItemKindConstant,
+	"interface":  CompletionItemKindInterface,
+	"module":     CompletionItemKindModule,
+	"package":    CompletionItemKindModule,
+	"namespace":  CompletionItemKindModule,
+	"enum":       CompletionItemKindEnum,
+	"type":       CompletionItemKindTypeParameter,
+	"field":      CompletionItemKindField,
+	"property":   CompletionItemKindProperty,
+	"parameter":  CompletionItemKindVariable,
+	"keyword":    CompletionItemKindKeyword,
+	"file":       CompletionItemKindFile,
+	"reference":  CompletionItemKindReference,
+	"folder":     CompletionItemKindFolder,
+	"enumMember": CompletionItemKindEnumMember,
+	"snippet":    CompletionItemKindSnippet,
+	"text":       CompletionItemKindText,
+	"operator":   CompletionItemKindOperator,
+	"annotation": CompletionItemKindKeyword,
+	"member":     CompletionItemKindField,
 }
 
 // Main Function
@@ -266,7 +270,6 @@ func main() {
 	}
 
 	server := &Server{
-		tagsFile: config.tagsFile,
 		cache: FileCache{
 			content: make(map[string][]string),
 		},
@@ -318,21 +321,16 @@ func main() {
 type Config struct {
 	showHelp    bool
 	showVersion bool
-	tagsFile    string
 }
 
-// parseFlags parses command-line arguments
 func parseFlags() *Config {
 	config := &Config{}
-	for i, arg := range os.Args {
-		if arg == "-h" || arg == "--help" {
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "-h", "--help":
 			config.showHelp = true
-		}
-		if arg == "-v" || arg == "--version" {
+		case "-v", "--version":
 			config.showVersion = true
-		}
-		if !strings.HasPrefix(arg, "-") && i > 0 {
-			config.tagsFile = arg
 		}
 	}
 	return config
@@ -340,16 +338,14 @@ func parseFlags() *Config {
 
 func flagUsage() {
 	fmt.Printf(`CTags Language Server
-Provides code completion and goto definition functionality using ctags files.
+Provides code completion and goto definition functionality using ctags JSON output.
 
 Usage:
-  %s [options] [ctags-file]
+  %s [options]
 
 Options:
   -h, --help     Show this help message
   -v, --version  Show version information
-
-If no ctags file is specified, the server will look for a 'tags' file in the current directory.
 `, os.Args[0])
 }
 
@@ -425,7 +421,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 	// Convert RootURI to filesystem path
 	server.rootPath = uriToPath(params.RootURI)
 	// Load ctags entries
-	if err := server.loadTags(); err != nil {
+	if err := server.loadTagsFromJSON(); err != nil {
 		sendError(req.ID, -32603, "Internal error", err.Error())
 		return
 	}
@@ -438,7 +434,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 				OpenClose: true,
 			},
 			CompletionProvider: &CompletionOptions{
-				TriggerCharacters: []string{".", ":", ">"},
+				TriggerCharacters: []string{".", ":", ">", "\""},
 			},
 			DefinitionProvider: true,
 			CodeLensProvider: &CodeLensOptions{
@@ -529,32 +525,25 @@ func handleCompletion(server *Server, req RPCRequest) {
 		return
 	}
 
-	// Get current document's file extension
-	currentExt := filepath.Ext(uriToPath(params.TextDocument.URI))
-
 	// Retrieve the current word at the cursor position
 	word := server.getCurrentWord(params.TextDocument.URI, params.Position)
 	var items []CompletionItem
 
 	seenItems := make(map[string]bool)
 	for _, entry := range server.tagEntries {
-		// Only process entries with matching file extension
-		if filepath.Ext(entry.Path) != currentExt {
-			continue
-		}
-
 		if strings.HasPrefix(strings.ToLower(entry.Name), strings.ToLower(word)) {
 			if seenItems[entry.Name] {
 				continue // Avoid duplicate entries
 			}
 			seenItems[entry.Name] = true
 
+			kind := getLSPCompletionKind(entry.Kind)
 			items = append(items, CompletionItem{
 				Label:  entry.Name,
-				Kind:   getLSPCompletionKind(entry.Kind),
+				Kind:   kind,
 				Detail: fmt.Sprintf("%s (%s)", entry.Path, entry.Kind),
 				Documentation: &MarkupContent{
-					Kind:  "markdown",
+					Kind:  "plaintext",
 					Value: entry.Pattern,
 				},
 			})
@@ -588,11 +577,16 @@ func handleDefinition(server *Server, req RPCRequest) {
 	var locations []Location
 	for _, entry := range server.tagEntries {
 		if entry.Name == word {
+			line := entry.Line
+			// If line number is not available, attempt to extract from pattern
+			if line == 0 && entry.Pattern != "" {
+				line = server.extractLineFromPattern(entry.Pattern)
+			}
 			loc := Location{
 				URI: filepathToURI(filepath.Join(server.rootPath, entry.Path)),
 				Range: Range{
-					Start: Position{Line: entry.Line - 1, Character: 0},
-					End:   Position{Line: entry.Line - 1, Character: 0},
+					Start: Position{Line: line - 1, Character: 0},
+					End:   Position{Line: line - 1, Character: 0},
 				},
 			}
 			locations = append(locations, loc)
@@ -655,84 +649,40 @@ func filepathToURI(path string) string {
 	return "file://" + filepath.ToSlash(absPath)
 }
 
-// loadTags loads and parses the ctags file into TagEntry structs
-func (s *Server) loadTags() error {
-	tagsPath := s.tagsFile
-	if tagsPath == "" {
-		tagsPath = filepath.Join(s.rootPath, "tags")
-	}
-
-	file, err := os.Open(tagsPath)
+// loadTagsFromJSON executes the ctags command and parses the JSON output
+func (s *Server) loadTagsFromJSON() error {
+	cmd := exec.Command("ctags", "--output-format=json", "-R")
+	cmd.Dir = s.rootPath
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("error opening tags file: %v", err)
+		return fmt.Errorf("failed to get stdout from ctags command: %v", err)
 	}
-	defer file.Close()
 
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadString('\n')
-		if err == io.EOF {
-			break // End of file
-		}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start ctags command: %v", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		var entry TagEntry
+		err := json.Unmarshal([]byte(line), &entry)
 		if err != nil {
-			return fmt.Errorf("error reading tags file: %v", err)
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "!") {
-			continue // Skip empty lines and comments
-		}
-
-		entry, err := parseCTagsLine(line)
-		if err != nil {
-			log.Printf("Warning: Skipping invalid tags entry: %v", err)
+			log.Printf("Failed to parse ctags JSON entry: %v", err)
 			continue
 		}
-
-		s.tagEntries = append(s.tagEntries, *entry)
+		s.tagEntries = append(s.tagEntries, entry)
 	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading ctags output: %v", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("ctags command failed: %v", err)
+	}
+
 	return nil
-}
-
-// parseCTagsLine parses a single ctags line into a TagEntry
-func parseCTagsLine(line string) (*TagEntry, error) {
-	fields := strings.Split(line, "\t")
-	if len(fields) < 3 {
-		return nil, fmt.Errorf("invalid ctags line format")
-	}
-
-	entry := &TagEntry{
-		Name: fields[0],
-		Path: fields[1],
-	}
-
-	// Parse the pattern field
-	pattern := fields[2]
-	if len(pattern) > 2 && pattern[0] == '/' && pattern[len(pattern)-1] == '/' {
-		entry.Pattern = pattern[1 : len(pattern)-1]
-	} else {
-		entry.Pattern = pattern
-	}
-
-	// Extract line number from pattern if available
-	if strings.HasPrefix(entry.Pattern, "^") {
-		lineNoStr := regexp.MustCompile(`(\d+)`).FindString(entry.Pattern)
-		if lineNo, err := strconv.Atoi(lineNoStr); err == nil {
-			entry.Line = lineNo
-		}
-	}
-
-	if len(fields) > 3 {
-		kindCode := fields[3]
-		// Map kind code to kind name
-		if kind, ok := kindMap[kindCode]; ok {
-			entry.Kind = kind
-		} else {
-			entry.Kind = "unknown"
-		}
-	}
-
-	return entry, nil
 }
 
 // getCurrentWord retrieves the current word at the given position in the document
@@ -773,43 +723,25 @@ func isIdentifierChar(c rune) bool {
 	return (c >= 'a' && c <= 'z') ||
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') ||
-		c == '_'
+		c == '_' || c == '$'
 }
 
 // getLSPCompletionKind maps ctags kinds to LSP completion item kinds
 func getLSPCompletionKind(ctagsKind string) int {
-	switch ctagsKind {
-	case "function", "method":
-		return 3 // CompletionItemKindFunction
-	case "class":
-		return 7 // CompletionItemKindClass
-	case "struct", "record", "union":
-		return 22 // CompletionItemKindStruct
-	case "variable", "local", "externvar", "parameter":
-		return 6 // CompletionItemKindVariable
-	case "constant", "define":
-		return 21 // CompletionItemKindConstant
-	case "interface":
-		return 8 // CompletionItemKindInterface
-	case "module", "package", "namespace":
-		return 9 // CompletionItemKindModule
-	case "enum":
-		return 13 // CompletionItemKindEnum
-	case "type":
-		return 25 // CompletionItemKindTypeParameter
-	case "label":
-		return 14 // CompletionItemKindKeyword
-	case "operator":
-		return 24 // CompletionItemKindOperator
-	case "annotation":
-		return 14 // CompletionItemKindKeyword
-	case "header":
-		return 17 // CompletionItemKindFile
-	case "object":
-		return 7 // CompletionItemKindClass
-	case "block":
-		return 1 // CompletionItemKindText
-	default:
-		return 1 // CompletionItemKindText
+	if kind, ok := kindMap[ctagsKind]; ok {
+		return kind
 	}
+	return CompletionItemKindText // Default to Text
+}
+
+// extractLineFromPattern attempts to extract line number from the ctags pattern
+func (s *Server) extractLineFromPattern(pattern string) int {
+	re := regexp.MustCompile(`\d+`)
+	match := re.FindString(pattern)
+	if match != "" {
+		if line, err := strconv.Atoi(match); err == nil {
+			return line
+		}
+	}
+	return 0
 }
