@@ -16,35 +16,6 @@ import (
 	"sync"
 )
 
-// LSP Completion Item Kind Constants
-const (
-	CompletionItemKindText          = 1
-	CompletionItemKindMethod        = 2
-	CompletionItemKindFunction      = 3
-	CompletionItemKindConstructor   = 4
-	CompletionItemKindField         = 5
-	CompletionItemKindVariable      = 6
-	CompletionItemKindClass         = 7
-	CompletionItemKindInterface     = 8
-	CompletionItemKindModule        = 9
-	CompletionItemKindProperty      = 10
-	CompletionItemKindUnit          = 11
-	CompletionItemKindValue         = 12
-	CompletionItemKindEnum          = 13
-	CompletionItemKindKeyword       = 14
-	CompletionItemKindSnippet       = 15
-	CompletionItemKindColor         = 16
-	CompletionItemKindFile          = 17
-	CompletionItemKindReference     = 18
-	CompletionItemKindFolder        = 19
-	CompletionItemKindEnumMember    = 20
-	CompletionItemKindConstant      = 21
-	CompletionItemKindStruct        = 22
-	CompletionItemKindEvent         = 23
-	CompletionItemKindOperator      = 24
-	CompletionItemKindTypeParameter = 25
-)
-
 // RPCRequest represents a JSON-RPC request structure
 type RPCRequest struct {
 	Jsonrpc string          `json:"jsonrpc"`
@@ -223,35 +194,6 @@ type TagEntry struct {
 	TypeRef   string `json:"typeref,omitempty"`
 	Language  string `json:"language,omitempty"`
 	Line      int    `json:"line,omitempty"`
-}
-
-// kindMap maps ctags kind strings to LSP completion item kinds using constants
-var kindMap = map[string]int{
-	"function":   CompletionItemKindFunction,
-	"method":     CompletionItemKindMethod,
-	"class":      CompletionItemKindClass,
-	"struct":     CompletionItemKindStruct,
-	"variable":   CompletionItemKindVariable,
-	"constant":   CompletionItemKindConstant,
-	"interface":  CompletionItemKindInterface,
-	"module":     CompletionItemKindModule,
-	"package":    CompletionItemKindModule,
-	"namespace":  CompletionItemKindModule,
-	"enum":       CompletionItemKindEnum,
-	"type":       CompletionItemKindTypeParameter,
-	"field":      CompletionItemKindField,
-	"property":   CompletionItemKindProperty,
-	"parameter":  CompletionItemKindVariable,
-	"keyword":    CompletionItemKindKeyword,
-	"file":       CompletionItemKindFile,
-	"reference":  CompletionItemKindReference,
-	"folder":     CompletionItemKindFolder,
-	"enumMember": CompletionItemKindEnumMember,
-	"snippet":    CompletionItemKindSnippet,
-	"text":       CompletionItemKindText,
-	"operator":   CompletionItemKindOperator,
-	"annotation": CompletionItemKindKeyword,
-	"member":     CompletionItemKindField,
 }
 
 // Main Function
@@ -537,7 +479,7 @@ func handleCompletion(server *Server, req RPCRequest) {
 			}
 			seenItems[entry.Name] = true
 
-			kind := getLSPCompletionKind(entry.Kind)
+			kind := GetLSPCompletionKind(entry.Kind)
 			items = append(items, CompletionItem{
 				Label:  entry.Name,
 				Kind:   kind,
@@ -724,14 +666,6 @@ func isIdentifierChar(c rune) bool {
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') ||
 		c == '_' || c == '$'
-}
-
-// getLSPCompletionKind maps ctags kinds to LSP completion item kinds
-func getLSPCompletionKind(ctagsKind string) int {
-	if kind, ok := kindMap[ctagsKind]; ok {
-		return kind
-	}
-	return CompletionItemKindText // Default to Text
 }
 
 // extractLineFromPattern attempts to extract line number from the ctags pattern
