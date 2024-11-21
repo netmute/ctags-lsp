@@ -217,19 +217,12 @@ func getInstallInstructions() string {
 	}
 }
 
-// checkCtagsInstallation verifies that Universal Ctags is installed and available
+// checkCtagsInstallation verifies that Universal Ctags is installed and supports required features
 func checkCtagsInstallation() error {
-	cmd := exec.Command("ctags", "--version")
+	cmd := exec.Command("ctags", "--version", "--output-format=json")
 	output, err := cmd.Output()
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("incorrect ctags version. Universal Ctags is required.\n%s", getInstallInstructions())
-		}
-		return fmt.Errorf("ctags command not found.\n%s", getInstallInstructions())
-	}
-
-	if !strings.Contains(string(output), "Universal Ctags") {
-		return fmt.Errorf("incorrect ctags version. Universal Ctags is required.\n%s", getInstallInstructions())
+	if err != nil || !strings.Contains(string(output), "Universal Ctags") {
+		return fmt.Errorf("ctags command not found or incorrect version. Universal Ctags with JSON support is required.\n%s", getInstallInstructions())
 	}
 
 	return nil
