@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -228,6 +227,8 @@ func checkCtagsInstallation() error {
 	return nil
 }
 
+var version = "unknown" // Populated with -X main.version
+
 // Main Function
 func main() {
 	config := parseFlags()
@@ -244,8 +245,7 @@ func main() {
 	}
 
 	if config.showVersion {
-		version, commitHash := getVersionInfo()
-		fmt.Printf("CTags Language Server version %s (commit %s)\n", version, commitHash)
+		fmt.Printf("CTags Language Server version %s\n", version)
 		os.Exit(0)
 	}
 
@@ -327,37 +327,6 @@ Options:
   -h, --help     Show this help message
   -v, --version  Show version information
 `, os.Args[0])
-}
-
-func getVersionInfo() (version, commitHash string) {
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok || buildInfo == nil {
-		return "unknown", "unknown"
-	}
-
-	version = buildInfo.Main.Version
-
-	var revision, modified string
-	for _, setting := range buildInfo.Settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = setting.Value
-		case "vcs.modified":
-			modified = setting.Value
-		}
-	}
-
-	if len(revision) >= 7 {
-		commitHash = revision[:7]
-	} else {
-		commitHash = revision
-	}
-
-	if modified == "true" {
-		commitHash += "-dirty"
-	}
-
-	return version, commitHash
 }
 
 // handleRequest routes JSON-RPC requests to appropriate handlers
