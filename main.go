@@ -61,6 +61,7 @@ type ServerCapabilities struct {
 type TextDocumentSyncOptions struct {
 	Change    int  `json:"change"`
 	OpenClose bool `json:"openClose"`
+	Save      bool `json:"save"`
 }
 
 // CompletionOptions defines options for the completion provider
@@ -370,7 +371,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 	// Convert RootURI to filesystem path
 	server.rootPath = uriToPath(params.RootURI)
 	// Load ctags entries
-	if err := server.loadTagsFromJSON(); err != nil {
+	if err := server.scanRecursiveTags(); err != nil {
 		sendError(req.ID, -32603, "Internal error", err.Error())
 		return
 	}
@@ -381,6 +382,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 			TextDocumentSync: &TextDocumentSyncOptions{
 				Change:    1, // Full synchronization
 				OpenClose: true,
+				Save:      true,
 			},
 			CompletionProvider: &CompletionOptions{
 				TriggerCharacters: []string{".", ":", ">", "\""},
@@ -462,7 +464,19 @@ func handleDidClose(server *Server, req RPCRequest) {
 
 // handleDidSave processes the 'textDocument/didSave' notification
 func handleDidSave(server *Server, req RPCRequest) {
-	// Currently not utilized
+	var params DidSaveTextDocumentParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return
+	}
+
+	// Get file path from URI
+	filePath := uriToPath(params.TextDocument.URI)
+
+	// Scan the file again
+	if err := server.scanSingleFileTag(filePath); err != nil {
+		log.Printf("Error rescanning file %s: %v", filePath, err)
+	}
 }
 
 // handleCompletion processes the 'textDocument/completion' request
@@ -646,10 +660,32 @@ func filepathToURI(path string) string {
 	return "file://" + filepath.ToSlash(absPath)
 }
 
-// loadTagsFromJSON executes the ctags command and parses the JSON output
-func (s *Server) loadTagsFromJSON() error {
+// scanRecursiveTags scans all files in the root path
+func (s *Server) scanRecursiveTags() error {
 	cmd := exec.Command("ctags", "--output-format=json", "-R")
 	cmd.Dir = s.rootPath
+	return s.processTagsOutput(cmd)
+}
+
+// scanSingleFileTag scans a single file, removing previous entries for that file
+func (s *Server) scanSingleFileTag(filePath string) error {
+	s.mu.Lock()
+	newEntries := make([]TagEntry, 0, len(s.tagEntries))
+	for _, entry := range s.tagEntries {
+		if entry.Path != filePath {
+			newEntries = append(newEntries, entry)
+		}
+	}
+	s.tagEntries = newEntries
+	s.mu.Unlock()
+
+	cmd := exec.Command("ctags", "--output-format=json", filePath)
+	cmd.Dir = s.rootPath
+	return s.processTagsOutput(cmd)
+}
+
+// processTagsOutput handles the ctags command execution and output processing
+func (s *Server) processTagsOutput(cmd *exec.Cmd) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdout from ctags command: %v", err)
@@ -660,15 +696,14 @@ func (s *Server) loadTagsFromJSON() error {
 	}
 
 	scanner := bufio.NewScanner(stdout)
+	var entries []TagEntry
 	for scanner.Scan() {
-		line := scanner.Text()
 		var entry TagEntry
-		err := json.Unmarshal([]byte(line), &entry)
-		if err != nil {
+		if err := json.Unmarshal([]byte(scanner.Text()), &entry); err != nil {
 			log.Printf("Failed to parse ctags JSON entry: %v", err)
 			continue
 		}
-		s.tagEntries = append(s.tagEntries, entry)
+		entries = append(entries, entry)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -678,6 +713,10 @@ func (s *Server) loadTagsFromJSON() error {
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("ctags command failed: %v", err)
 	}
+
+	s.mu.Lock()
+	s.tagEntries = append(s.tagEntries, entries...)
+	s.mu.Unlock()
 
 	return nil
 }
