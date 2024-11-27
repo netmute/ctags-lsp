@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -183,11 +182,11 @@ type TagEntry struct {
 	Path      string `json:"path"`
 	Pattern   string `json:"pattern"`
 	Kind      string `json:"kind"`
+	Line      int    `json:"line"`
 	Scope     string `json:"scope,omitempty"`
 	ScopeKind string `json:"scopeKind,omitempty"`
 	TypeRef   string `json:"typeref,omitempty"`
 	Language  string `json:"language,omitempty"`
-	Line      int    `json:"line,omitempty"`
 }
 
 // getInstallInstructions returns OS-specific installation instructions for Universal Ctags
@@ -541,7 +540,7 @@ func handleCompletion(server *Server, req RPCRequest) {
 				items = append(items, CompletionItem{
 					Label:  entry.Name,
 					Kind:   kind,
-					Detail: fmt.Sprintf("%s (%s)", entry.Path, entry.Kind),
+					Detail: fmt.Sprintf("%s:%d (%s)", entry.Path, entry.Line, entry.Kind),
 					Documentation: &MarkupContent{
 						Kind:  "plaintext",
 						Value: entry.Pattern,
@@ -614,7 +613,7 @@ func filepathToURI(path string) string {
 
 // scanRecursiveTags scans all files in the root path
 func (s *Server) scanRecursiveTags() error {
-	cmd := exec.Command("ctags", "--output-format=json", "-R")
+	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", "-R")
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
@@ -631,7 +630,7 @@ func (s *Server) scanSingleFileTag(filePath string) error {
 	s.tagEntries = newEntries
 	s.mu.Unlock()
 
-	cmd := exec.Command("ctags", "--output-format=json", filePath)
+	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", filePath)
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
@@ -713,16 +712,4 @@ func isIdentifierChar(c rune) bool {
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') ||
 		c == '_' || c == '$'
-}
-
-// extractLineFromPattern attempts to extract line number from the ctags pattern
-func (s *Server) extractLineFromPattern(pattern string) int {
-	re := regexp.MustCompile(`\d+`)
-	match := re.FindString(pattern)
-	if match != "" {
-		if line, err := strconv.Atoi(match); err == nil {
-			return line
-		}
-	}
-	return 0
 }
