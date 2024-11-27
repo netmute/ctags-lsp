@@ -53,7 +53,6 @@ type InitializeResult struct {
 type ServerCapabilities struct {
 	TextDocumentSync   *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
 	CompletionProvider *CompletionOptions       `json:"completionProvider,omitempty"`
-	DefinitionProvider bool                     `json:"definitionProvider,omitempty"`
 	CodeLensProvider   *CodeLensOptions         `json:"codeLensProvider,omitempty"`
 }
 
@@ -149,12 +148,6 @@ type MarkupContent struct {
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
-}
-
-// DefinitionParams represents the 'textDocument/definition' request
-type DefinitionParams struct {
-	TextDocument PositionParams `json:"textDocument"`
-	Position     Position       `json:"position"`
 }
 
 // Location represents a location in a text document
@@ -319,7 +312,7 @@ func parseFlags() *Config {
 
 func flagUsage() {
 	fmt.Printf(`CTags Language Server
-Provides code completion and goto definition functionality using ctags JSON output.
+Provides LSP functionality using ctags JSON output.
 
 Usage:
   %s [options]
@@ -351,8 +344,6 @@ func handleRequest(server *Server, req RPCRequest) {
 		handleDidSave(server, req)
 	case "textDocument/completion":
 		handleCompletion(server, req)
-	case "textDocument/definition":
-		handleDefinition(server, req)
 	default:
 		// Method not found
 		sendError(req.ID, -32601, "Method not found", nil)
@@ -387,7 +378,6 @@ func handleInitialize(server *Server, req RPCRequest) {
 			CompletionProvider: &CompletionOptions{
 				TriggerCharacters: []string{".", ":", ">", "\""},
 			},
-			DefinitionProvider: true,
 			CodeLensProvider: &CodeLensOptions{
 				ResolveProvider: false,
 			},
@@ -567,44 +557,6 @@ func handleCompletion(server *Server, req RPCRequest) {
 	}
 
 	sendResult(req.ID, result)
-}
-
-// handleDefinition processes the 'textDocument/definition' request
-func handleDefinition(server *Server, req RPCRequest) {
-	var params DefinitionParams
-	err := json.Unmarshal(req.Params, &params)
-	if err != nil {
-		sendError(req.ID, -32602, "Invalid params", nil)
-		return
-	}
-
-	// Retrieve the current word at the cursor position
-	word := server.getCurrentWord(params.TextDocument.URI, params.Position)
-	if word == "" {
-		sendResult(req.ID, []Location{})
-		return
-	}
-
-	var locations []Location
-	for _, entry := range server.tagEntries {
-		if entry.Name == word {
-			line := entry.Line
-			// If line number is not available, attempt to extract from pattern
-			if line == 0 && entry.Pattern != "" {
-				line = server.extractLineFromPattern(entry.Pattern)
-			}
-			loc := Location{
-				URI: filepathToURI(filepath.Join(server.rootPath, entry.Path)),
-				Range: Range{
-					Start: Position{Line: line - 1, Character: 0},
-					End:   Position{Line: line - 1, Character: 0},
-				},
-			}
-			locations = append(locations, loc)
-		}
-	}
-
-	sendResult(req.ID, locations)
 }
 
 // sendResult sends a successful JSON-RPC response
