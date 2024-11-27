@@ -50,9 +50,11 @@ type InitializeResult struct {
 
 // ServerCapabilities defines the capabilities of the language server
 type ServerCapabilities struct {
-	TextDocumentSync   *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
-	CompletionProvider *CompletionOptions       `json:"completionProvider,omitempty"`
-	CodeLensProvider   *CodeLensOptions         `json:"codeLensProvider,omitempty"`
+	TextDocumentSync        *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
+	CompletionProvider      *CompletionOptions       `json:"completionProvider,omitempty"`
+	CodeLensProvider        *CodeLensOptions         `json:"codeLensProvider,omitempty"`
+	DefinitionProvider      bool                     `json:"definitionProvider,omitempty"`
+	WorkspaceSymbolProvider bool                     `json:"workspaceSymbolProvider,omitempty"`
 }
 
 // TextDocumentSyncOptions defines options for text document synchronization
@@ -65,6 +67,19 @@ type TextDocumentSyncOptions struct {
 // CompletionOptions defines options for the completion provider
 type CompletionOptions struct {
 	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
+}
+
+// WorkspaceSymbolParams represents the parameters for the 'workspace/symbol' request
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+// SymbolInformation represents information about a symbol
+type SymbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
 }
 
 // CodeLensOptions defines options for the CodeLens provider
@@ -83,6 +98,12 @@ type TextDocument struct {
 	LanguageID string `json:"languageId"`
 	Version    int    `json:"version"`
 	Text       string `json:"text"`
+}
+
+// TextDocumentPositionParams represents the parameters used in requests that require a text document and position.
+type TextDocumentPositionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
 }
 
 // DidChangeTextDocumentParams represents the 'textDocument/didChange' notification
@@ -343,6 +364,10 @@ func handleRequest(server *Server, req RPCRequest) {
 		handleDidSave(server, req)
 	case "textDocument/completion":
 		handleCompletion(server, req)
+	case "textDocument/definition":
+		handleDefinition(server, req)
+	case "workspace/symbol":
+		handleWorkspaceSymbol(server, req)
 	default:
 		// Method not found
 		sendError(req.ID, -32601, "Method not found", nil)
@@ -380,6 +405,8 @@ func handleInitialize(server *Server, req RPCRequest) {
 			CodeLensProvider: &CodeLensOptions{
 				ResolveProvider: false,
 			},
+			WorkspaceSymbolProvider: true,
+			DefinitionProvider:      true,
 		},
 	}
 
@@ -556,6 +583,176 @@ func handleCompletion(server *Server, req RPCRequest) {
 	}
 
 	sendResult(req.ID, result)
+}
+
+// handleDefinition processes the 'textDocument/definition' request
+func handleDefinition(server *Server, req RPCRequest) {
+	var params TextDocumentPositionParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		sendError(req.ID, -32602, "Invalid params", nil)
+		return
+	}
+
+	// Get the current word at the given position
+	symbol := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	if symbol == "" {
+		sendResult(req.ID, nil) // No symbol found at position
+		return
+	}
+
+	// Search for the symbol in the tagEntries
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	var locations []Location
+	for _, entry := range server.tagEntries {
+		if entry.Name == symbol {
+			// Create a Location for the symbol's definition
+			filePath := filepath.Join(server.rootPath, entry.Path)
+			uri := filepathToURI(filePath)
+
+			// Load file content into cache if not already loaded
+			server.cache.mu.Lock()
+			content, ok := server.cache.content[filePath]
+			server.cache.mu.Unlock()
+
+			if !ok {
+				// Load the file content
+				lines, err := readFileLines(filePath)
+				if err != nil {
+					log.Printf("Failed to read file %s: %v", filePath, err)
+					continue
+				}
+
+				// Store content in cache
+				server.cache.mu.Lock()
+				server.cache.content[filePath] = lines
+				server.cache.mu.Unlock()
+				content = lines
+			}
+
+			// Find the symbol's range within the file using existing function
+			symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
+
+			location := Location{
+				URI:   uri,
+				Range: symbolRange,
+			}
+			locations = append(locations, location)
+		}
+	}
+
+	// Send the locations back
+	if len(locations) == 0 {
+		sendResult(req.ID, nil) // No definition found
+	} else if len(locations) == 1 {
+		sendResult(req.ID, locations[0])
+	} else {
+		sendResult(req.ID, locations)
+	}
+}
+
+// handleWorkspaceSymbol processes the 'workspace/symbol' request
+func handleWorkspaceSymbol(server *Server, req RPCRequest) {
+	var params WorkspaceSymbolParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		sendError(req.ID, -32602, "Invalid params", nil)
+		return
+	}
+
+	query := params.Query
+	var symbols []SymbolInformation
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	for _, entry := range server.tagEntries {
+		if entry.Name == query {
+			kind := GetLSPCompletionKind(entry.Kind)
+			filePath := filepath.Join(server.rootPath, entry.Path)
+			uri := filepathToURI(filePath)
+
+			// Load file content into cache if not already loaded
+			server.cache.mu.Lock()
+			content, ok := server.cache.content[filePath]
+			server.cache.mu.Unlock()
+
+			if !ok {
+				// Load the file content
+				lines, err := readFileLines(filePath)
+				if err != nil {
+					log.Printf("Failed to read file %s: %v", filePath, err)
+					continue
+				}
+
+				// Store content in cache
+				server.cache.mu.Lock()
+				server.cache.content[filePath] = lines
+				server.cache.mu.Unlock()
+				content = lines
+			}
+
+			// Find the symbol's range within the file
+			symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
+
+			symbol := SymbolInformation{
+				Name: entry.Name,
+				Kind: kind,
+				Location: Location{
+					URI:   uri,
+					Range: symbolRange,
+				},
+				ContainerName: entry.Scope,
+			}
+			symbols = append(symbols, symbol)
+		}
+	}
+
+	sendResult(req.ID, symbols)
+}
+
+// readFileLines reads the content of a file and returns it as a slice of lines
+func readFileLines(filePath string) ([]string, error) {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	content := string(contentBytes)
+	lines := strings.Split(content, "\n")
+	return lines, nil
+}
+
+// findSymbolRangeInFile searches for the symbol in the specified line and returns its range
+func findSymbolRangeInFile(lines []string, symbolName string, lineNumber int) Range {
+	// Adjust line number to zero-based index
+	lineIdx := lineNumber - 1
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		// Line number out of range; return a zero range
+		return Range{
+			Start: Position{Line: lineIdx, Character: 0},
+			End:   Position{Line: lineIdx, Character: 0},
+		}
+	}
+
+	lineContent := lines[lineIdx]
+	startChar := strings.Index(lineContent, symbolName)
+	if startChar == -1 {
+		// Symbol not found in the expected line; default to line start
+		return Range{
+			Start: Position{Line: lineIdx, Character: 0},
+			End:   Position{Line: lineIdx, Character: len([]rune(lineContent))},
+		}
+	}
+
+	// Calculate the end character position
+	endChar := startChar + len([]rune(symbolName))
+
+	return Range{
+		Start: Position{Line: lineIdx, Character: startChar},
+		End:   Position{Line: lineIdx, Character: endChar},
+	}
 }
 
 // sendResult sends a successful JSON-RPC response
