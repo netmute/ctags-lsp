@@ -52,7 +52,6 @@ type InitializeResult struct {
 type ServerCapabilities struct {
 	TextDocumentSync        *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
 	CompletionProvider      *CompletionOptions       `json:"completionProvider,omitempty"`
-	CodeLensProvider        *CodeLensOptions         `json:"codeLensProvider,omitempty"`
 	DefinitionProvider      bool                     `json:"definitionProvider,omitempty"`
 	WorkspaceSymbolProvider bool                     `json:"workspaceSymbolProvider,omitempty"`
 }
@@ -80,11 +79,6 @@ type SymbolInformation struct {
 	Kind          int      `json:"kind"`
 	Location      Location `json:"location"`
 	ContainerName string   `json:"containerName,omitempty"`
-}
-
-// CodeLensOptions defines options for the CodeLens provider
-type CodeLensOptions struct {
-	ResolveProvider bool `json:"resolveProvider,omitempty"`
 }
 
 // DidOpenTextDocumentParams represents the 'textDocument/didOpen' notification
@@ -401,9 +395,6 @@ func handleInitialize(server *Server, req RPCRequest) {
 			},
 			CompletionProvider: &CompletionOptions{
 				TriggerCharacters: []string{".", ":", ">", "\""},
-			},
-			CodeLensProvider: &CodeLensOptions{
-				ResolveProvider: false,
 			},
 			WorkspaceSymbolProvider: true,
 			DefinitionProvider:      true,
