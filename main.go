@@ -394,7 +394,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 				Save:      true,
 			},
 			CompletionProvider: &CompletionOptions{
-				TriggerCharacters: []string{".", ":", ">", "\""},
+				TriggerCharacters: []string{".", "\""},
 			},
 			WorkspaceSymbolProvider: true,
 			DefinitionProvider:      true,
