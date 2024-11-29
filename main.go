@@ -190,6 +190,26 @@ type FileCache struct {
 	content map[string][]string
 }
 
+// GetOrLoadFileContent retrieves file content from cache or loads it from disk if not present
+func (fc *FileCache) GetOrLoadFileContent(filePath string) ([]string, error) {
+	fc.mu.RLock()
+	content, ok := fc.content[filePath]
+	fc.mu.RUnlock()
+	if ok {
+		return content, nil
+	}
+	// Load the file content
+	lines, err := readFileLines(filePath)
+	if err != nil {
+		return nil, err
+	}
+	// Store content in cache
+	fc.mu.Lock()
+	fc.content[filePath] = lines
+	fc.mu.Unlock()
+	return lines, nil
+}
+
 // TagEntry represents a single ctags JSON entry
 type TagEntry struct {
 	Type      string `json:"_type"`
@@ -265,44 +285,51 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		// Read headers
-		contentLength := 0
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				log.Fatalf("Error reading header: %v", err)
-			}
-			line = strings.TrimSpace(line)
-			if line == "" {
-				break // End of headers
-			}
-			if strings.HasPrefix(line, "Content-Length:") {
-				clStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
-				cl, err := strconv.Atoi(clStr)
-				if err != nil {
-					log.Fatalf("Invalid Content-Length: %v", err)
-				}
-				contentLength = cl
-			}
-		}
-
-		// Read body based on Content-Length
-		body := make([]byte, contentLength)
-		_, err := io.ReadFull(reader, body)
+		req, err := readMessage(reader)
 		if err != nil {
-			log.Fatalf("Error reading body: %v", err)
-		}
-
-		var req RPCRequest
-		err = json.Unmarshal(body, &req)
-		if err != nil {
-			log.Printf("Invalid JSON-RPC request: %v", err)
-			continue
+			log.Fatalf("Error reading message: %v", err)
 		}
 
 		// Handle request in a separate goroutine
 		go handleRequest(server, req)
 	}
+}
+
+// readMessage reads a single JSON-RPC message from the reader
+func readMessage(reader *bufio.Reader) (RPCRequest, error) {
+	contentLength := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return RPCRequest{}, fmt.Errorf("error reading header: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break // End of headers
+		}
+		if strings.HasPrefix(line, "Content-Length:") {
+			clStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+			cl, err := strconv.Atoi(clStr)
+			if err != nil {
+				return RPCRequest{}, fmt.Errorf("invalid Content-Length: %v", err)
+			}
+			contentLength = cl
+		}
+	}
+
+	body := make([]byte, contentLength)
+	_, err := io.ReadFull(reader, body)
+	if err != nil {
+		return RPCRequest{}, fmt.Errorf("error reading body: %v", err)
+	}
+
+	var req RPCRequest
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		return RPCRequest{}, fmt.Errorf("invalid JSON-RPC request: %v", err)
+	}
+
+	return req, nil
 }
 
 // Config holds command-line configuration options
@@ -517,7 +544,14 @@ func handleCompletion(server *Server, req RPCRequest) {
 	}
 
 	// Retrieve the current word at the cursor position
-	word := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	word, err := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	if err != nil {
+		sendResult(req.ID, CompletionList{
+			IsIncomplete: false,
+			Items:        []CompletionItem{},
+		})
+		return
+	}
 
 	var items []CompletionItem
 	seenItems := make(map[string]bool)
@@ -586,9 +620,9 @@ func handleDefinition(server *Server, req RPCRequest) {
 	}
 
 	// Get the current word at the given position
-	symbol := server.getCurrentWord(params.TextDocument.URI, params.Position)
-	if symbol == "" {
-		sendResult(req.ID, nil) // No symbol found at position
+	symbol, err := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	if err != nil {
+		sendResult(req.ID, nil) // No symbol found at position or error occurred
 		return
 	}
 
@@ -603,27 +637,14 @@ func handleDefinition(server *Server, req RPCRequest) {
 			filePath := filepath.Join(server.rootPath, entry.Path)
 			uri := filepathToURI(filePath)
 
-			// Load file content into cache if not already loaded
-			server.cache.mu.Lock()
-			content, ok := server.cache.content[filePath]
-			server.cache.mu.Unlock()
-
-			if !ok {
-				// Load the file content
-				lines, err := readFileLines(filePath)
-				if err != nil {
-					log.Printf("Failed to read file %s: %v", filePath, err)
-					continue
-				}
-
-				// Store content in cache
-				server.cache.mu.Lock()
-				server.cache.content[filePath] = lines
-				server.cache.mu.Unlock()
-				content = lines
+			// Use the refactored method to get file content
+			content, err := server.cache.GetOrLoadFileContent(filePath)
+			if err != nil {
+				log.Printf("Failed to get content for file %s: %v", filePath, err)
+				continue
 			}
 
-			// Find the symbol's range within the file using existing function
+			// Find the symbol's range within the file
 			symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
 
 			location := Location{
@@ -665,24 +686,11 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 			filePath := filepath.Join(server.rootPath, entry.Path)
 			uri := filepathToURI(filePath)
 
-			// Load file content into cache if not already loaded
-			server.cache.mu.Lock()
-			content, ok := server.cache.content[filePath]
-			server.cache.mu.Unlock()
-
-			if !ok {
-				// Load the file content
-				lines, err := readFileLines(filePath)
-				if err != nil {
-					log.Printf("Failed to read file %s: %v", filePath, err)
-					continue
-				}
-
-				// Store content in cache
-				server.cache.mu.Lock()
-				server.cache.content[filePath] = lines
-				server.cache.mu.Unlock()
-				content = lines
+			// Use the refactored method to get file content
+			content, err := server.cache.GetOrLoadFileContent(filePath)
+			if err != nil {
+				log.Printf("Failed to get content for file %s: %v", filePath, err)
+				continue
 			}
 
 			// Find the symbol's range within the file
@@ -861,19 +869,21 @@ func (s *Server) processTagsOutput(cmd *exec.Cmd) error {
 }
 
 // getCurrentWord retrieves the current word at the given position in the document
-func (s *Server) getCurrentWord(uri string, pos Position) string {
-	s.cache.mu.RLock()
-	lines, ok := s.cache.content[uriToPath(uri)]
-	s.cache.mu.RUnlock()
+func (s *Server) getCurrentWord(uri string, pos Position) (string, error) {
+	filePath := uriToPath(uri)
+	lines, err := s.cache.GetOrLoadFileContent(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to load file content: %v", err)
+	}
 
-	if !ok || pos.Line >= len(lines) {
-		return ""
+	if pos.Line >= len(lines) {
+		return "", fmt.Errorf("line %d out of range", pos.Line)
 	}
 
 	line := lines[pos.Line]
 	runes := []rune(line)
 	if pos.Character > len(runes) {
-		return ""
+		return "", fmt.Errorf("character %d out of range", pos.Character)
 	}
 
 	// Find word boundaries
@@ -888,10 +898,11 @@ func (s *Server) getCurrentWord(uri string, pos Position) string {
 	}
 
 	if start == end {
-		return ""
+		return "", fmt.Errorf("no word found at position")
 	}
 
-	return string(runes[start:end])
+	word := string(runes[start:end])
+	return word, nil
 }
 
 // isIdentifierChar checks if a rune is a valid identifier character
