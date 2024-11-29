@@ -817,16 +817,24 @@ func (s *Server) scanRecursiveTags() error {
 // scanSingleFileTag scans a single file, removing previous entries for that file
 func (s *Server) scanSingleFileTag(filePath string) error {
 	s.mu.Lock()
+	// Convert filePath to relative path
+	relPath, err := filepath.Rel(s.rootPath, filePath)
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to make file path relative: %v", err)
+	}
+
+	// Remove previous entries for that file
 	newEntries := make([]TagEntry, 0, len(s.tagEntries))
 	for _, entry := range s.tagEntries {
-		if entry.Path != filePath {
+		if entry.Path != relPath {
 			newEntries = append(newEntries, entry)
 		}
 	}
 	s.tagEntries = newEntries
 	s.mu.Unlock()
 
-	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", filePath)
+	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", relPath)
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
@@ -850,6 +858,15 @@ func (s *Server) processTagsOutput(cmd *exec.Cmd) error {
 			log.Printf("Failed to parse ctags JSON entry: %v", err)
 			continue
 		}
+
+		// Normalize the Path to be relative to rootPath
+		relPath, err := filepath.Rel(s.rootPath, filepath.Join(s.rootPath, entry.Path))
+		if err != nil {
+			log.Printf("Failed to make path relative for %s: %v", entry.Path, err)
+			continue
+		}
+		entry.Path = relPath
+
 		entries = append(entries, entry)
 	}
 
