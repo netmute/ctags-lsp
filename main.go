@@ -682,7 +682,11 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 
 	for _, entry := range server.tagEntries {
 		if entry.Name == query {
-			kind := GetLSPCompletionKind(entry.Kind)
+			kind, err := GetLSPSymbolKind(entry.Kind)
+			if err != nil {
+				// This tag has no symbol kind, skip
+				continue
+			}
 			filePath := filepath.Join(server.rootPath, entry.Path)
 			uri := filepathToURI(filePath)
 
