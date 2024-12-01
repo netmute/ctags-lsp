@@ -421,6 +421,5 @@ func GetLSPSymbolKind(ctagsKind string) (int, error) {
 	if kind, ok := symbolKindMap[ctagsKind]; ok {
 		return kind, nil
 	}
-
 	return 0, fmt.Errorf("no symbol kind for: %v", ctagsKind)
 }
