@@ -54,6 +54,7 @@ type ServerCapabilities struct {
 	CompletionProvider      *CompletionOptions       `json:"completionProvider,omitempty"`
 	DefinitionProvider      bool                     `json:"definitionProvider,omitempty"`
 	WorkspaceSymbolProvider bool                     `json:"workspaceSymbolProvider,omitempty"`
+	DocumentSymbolProvider  bool                     `json:"documentSymbolProvider,omitempty"`
 }
 
 // TextDocumentSyncOptions defines options for text document synchronization
@@ -71,6 +72,11 @@ type CompletionOptions struct {
 // WorkspaceSymbolParams represents the parameters for the 'workspace/symbol' request
 type WorkspaceSymbolParams struct {
 	Query string `json:"query"`
+}
+
+// DocumentSymbolParams represents the parameters for the 'textDocument/documentSymbol' request
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
 }
 
 // SymbolInformation represents information about a symbol
@@ -389,6 +395,8 @@ func handleRequest(server *Server, req RPCRequest) {
 		handleDefinition(server, req)
 	case "workspace/symbol":
 		handleWorkspaceSymbol(server, req)
+	case "textDocument/documentSymbol":
+		handleDocumentSymbol(server, req)
 	default:
 		// Method not found
 		sendError(req.ID, -32601, "Method not found", nil)
@@ -425,6 +433,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 			},
 			WorkspaceSymbolProvider: true,
 			DefinitionProvider:      true,
+			DocumentSymbolProvider:  true,
 		},
 	}
 
@@ -711,6 +720,72 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 			}
 			symbols = append(symbols, symbol)
 		}
+	}
+
+	sendResult(req.ID, symbols)
+}
+
+// handleDocumentSymbol processes the 'textDocument/documentSymbol' request
+func handleDocumentSymbol(server *Server, req RPCRequest) {
+	var params DocumentSymbolParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		sendError(req.ID, -32602, "Invalid params", nil)
+		return
+	}
+
+	filePath := uriToPath(params.TextDocument.URI)
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	var symbols []SymbolInformation
+
+	for _, entry := range server.tagEntries {
+		// Check if the symbol belongs to the requested document
+		absolutePath := filepath.Join(server.rootPath, entry.Path)
+		absolutePath, err := filepath.Abs(absolutePath)
+		if err != nil {
+			log.Printf("Failed to get absolute path for %s: %v", entry.Path, err)
+			continue
+		}
+
+		requestedPath, err := filepath.Abs(filePath)
+		if err != nil {
+			log.Printf("Failed to get absolute path for %s: %v", filePath, err)
+			continue
+		}
+
+		if absolutePath != requestedPath {
+			continue
+		}
+
+		kind, err := GetLSPSymbolKind(entry.Kind)
+		if err != nil {
+			// Skip symbols with unknown kinds
+			continue
+		}
+
+		uri := filepathToURI(absolutePath)
+
+		// Retrieve file content
+		content, err := server.cache.GetOrLoadFileContent(absolutePath)
+		if err != nil {
+			log.Printf("Failed to get content for file %s: %v", absolutePath, err)
+			continue
+		}
+
+		// Find the symbol's range within the file
+		symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
+
+		symbol := SymbolInformation{
+			Name:          entry.Name,
+			Kind:          kind,
+			Location:      Location{URI: uri, Range: symbolRange},
+			ContainerName: entry.Scope,
+		}
+
+		symbols = append(symbols, symbol)
 	}
 
 	sendResult(req.ID, symbols)
