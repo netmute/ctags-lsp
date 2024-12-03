@@ -22,5 +22,28 @@ go install github.com/netmute/ctags-lsp@latest
 
 ## Use
 
-The only supported/tested editor at this point is Neovim.  
-I have written a plugin that simplifies integration: [netmute/ctags-lsp.nvim](https://github.com/netmute/ctags-lsp.nvim)
+#### Neovim
+There is a plugin for easy integration: [netmute/ctags-lsp.nvim](https://github.com/netmute/ctags-lsp.nvim)
+```lua
+-- lazy.nvim
+{
+    "neovim/nvim-lspconfig",
+    dependencies = "netmute/ctags-lsp.nvim",
+    config = function()
+        require("lspconfig").ctags_lsp.setup({
+            filetypes = { "ruby" }, -- Or whatever language you want to use it for
+        })
+    end,
+}
+```
+
+#### Helix
+Add this to `~/.config/helix/languages.toml`:
+```toml
+[language-server.ctags-lsp]
+command = "ctags-lsp"
+
+[[language]]
+name = "toml"  # Or whatever language you want to use it for
+language-servers = [ "ctags-lsp" ]
+```
