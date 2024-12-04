@@ -293,7 +293,8 @@ func main() {
 	for {
 		req, err := readMessage(reader)
 		if err != nil {
-			log.Fatalf("Error reading message: %v", err)
+			sendError(nil, -32600, "Malformed request", err.Error())
+			continue // Ignore malformed request
 		}
 
 		// Handle request in a separate goroutine
