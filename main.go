@@ -419,11 +419,22 @@ func handleInitialize(server *Server, req RPCRequest) {
 		return
 	}
 
-	// Convert RootURI to filesystem path
-	server.rootPath = uriToPath(params.RootURI)
+	if params.RootURI == "" {
+		// Use current working directory if RootURI is empty
+		cwd, err := os.Getwd()
+		if err != nil {
+			sendError(req.ID, -32603, "Failed to get current working directory", err.Error())
+			return
+		}
+		server.rootPath = cwd
+	} else {
+		// Convert RootURI to filesystem path
+		server.rootPath = uriToPath(params.RootURI)
+	}
+
 	// Load ctags entries
 	if err := server.scanRecursiveTags(); err != nil {
-		sendError(req.ID, -32603, "Internal error", err.Error())
+		sendError(req.ID, -32603, "Internal error while scanning tags", err.Error())
 		return
 	}
 
