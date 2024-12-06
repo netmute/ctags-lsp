@@ -306,12 +306,18 @@ func main() {
 func readMessage(reader *bufio.Reader) (RPCRequest, error) {
 	contentLength := 0
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := reader.ReadString('\r')
 		if err != nil {
 			return RPCRequest{}, fmt.Errorf("error reading header: %v", err)
 		}
-		line = strings.TrimSpace(line)
-		if line == "" {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return RPCRequest{}, fmt.Errorf("error reading header: %v", err)
+		}
+		if b != '\n' {
+			return RPCRequest{}, fmt.Errorf("line endings must be \\r\\n")
+		}
+		if line == "\r" {
 			break // End of headers
 		}
 		if strings.HasPrefix(line, "Content-Length:") {
