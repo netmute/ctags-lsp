@@ -184,10 +184,11 @@ type Range struct {
 
 // Server represents the language server
 type Server struct {
-	tagEntries []TagEntry
-	rootPath   string
-	cache      FileCache
-	mu         sync.Mutex
+	tagEntries  []TagEntry
+	rootPath    string
+	cache       FileCache
+	initialized bool
+	mu          sync.Mutex
 }
 
 // FileCache stores the content of opened files for quick access
@@ -377,8 +378,29 @@ Options:
 `, os.Args[0])
 }
 
+// checkInitializedOrFail ensures that the server has been successfully initialized.
+func checkInitializedOrFail(id json.RawMessage, server *Server, method string) bool {
+	// The following methods are allowed even if not initialized:
+	// - initialize (the first request)
+	// - shutdown and exit (for cleanup)
+	if method == "initialize" || method == "shutdown" || method == "exit" {
+		return true
+	}
+
+	if !server.initialized {
+		sendError(id, -32002, "Server not initialized", "Received request before successful initialization")
+		return false
+	}
+	return true
+}
+
 // handleRequest routes JSON-RPC requests to appropriate handlers
 func handleRequest(server *Server, req RPCRequest) {
+	if !checkInitializedOrFail(req.ID, server, req.Method) {
+		// Server not initialized and request is not allowed.
+		return
+	}
+
 	switch req.Method {
 	case "initialize":
 		handleInitialize(server, req)
@@ -456,6 +478,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 	}
 
 	sendResult(req.ID, result)
+	server.initialized = true
 }
 
 // handleInitialized processes the 'initialized' notification
