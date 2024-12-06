@@ -261,7 +261,7 @@ func checkCtagsInstallation() error {
 	return nil
 }
 
-var version = "unknown" // Populated with -X main.version
+var version = "self compiled" // Populated with -X main.version
 
 // Main Function
 func main() {
@@ -279,7 +279,7 @@ func main() {
 	}
 
 	if config.showVersion {
-		fmt.Printf("CTags Language Server version %s\n", version)
+		fmt.Printf("CTags Language Server %s\n", version)
 		os.Exit(0)
 	}
 
