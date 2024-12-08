@@ -455,7 +455,7 @@ func handleInitialize(server *Server, req RPCRequest) {
 	}
 
 	// Load ctags entries
-	if err := server.scanRecursiveTags(); err != nil {
+	if err := server.scanWorkspace(); err != nil {
 		sendError(req.ID, -32603, "Internal error while scanning tags", err.Error())
 		return
 	}
@@ -927,11 +927,58 @@ func filepathToURI(path string) string {
 	return "file://" + filepath.ToSlash(absPath)
 }
 
-// scanRecursiveTags scans all files in the root path
-func (s *Server) scanRecursiveTags() error {
-	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", "-R")
-	cmd.Dir = s.rootPath
+// scanWorkspace scans all files in the root path
+func (s *Server) scanWorkspace() error {
+	var cmd *exec.Cmd
+
+	// Respect gitignore, fallback to all files
+	if isGitRepo(s.rootPath) {
+		// Use `git ls-files` to generate file list and pipe to ctags
+		cmd = pipeCommand("git", []string{"ls-files"}, "ctags", []string{"--output-format=json", "--fields=+n", "-L", "-"})
+	} else if isJjRepo(s.rootPath) {
+		// Use `jj file list` to generate file list and pipe to ctags
+		cmd = pipeCommand("jj", []string{"file", "list", "--repository", "."}, "ctags", []string{"--output-format=json", "--fields=+n", "-L", "-"})
+	} else {
+		// Fallback to `ctags -R`
+		cmd = exec.Command("ctags", "--output-format=json", "--fields=+n", "-R")
+		cmd.Dir = s.rootPath
+	}
+
 	return s.processTagsOutput(cmd)
+}
+
+// pipeCommand creates a command to pipe output from one command to another
+func pipeCommand(producerCmd string, producerArgs []string, consumerCmd string, consumerArgs []string) *exec.Cmd {
+	producer := exec.Command(producerCmd, producerArgs...)
+	consumer := exec.Command(consumerCmd, consumerArgs...)
+
+	// Pipe producer's stdout to consumer's stdin
+	pipe, err := producer.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to create pipe between commands: %v", err)
+	}
+	consumer.Stdin = pipe
+
+	// Start the producer when the consumer is executed
+	go func() {
+		if err := producer.Start(); err != nil {
+			log.Fatalf("Failed to start producer command (%s): %v", producerCmd, err)
+		}
+	}()
+
+	return consumer
+}
+
+// isGitRepo checks if the directory is a Git repository
+func isGitRepo(path string) bool {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree")
+	return cmd.Run() == nil
+}
+
+// isJjRepo checks if the directory is a Jujutsu repository
+func isJjRepo(path string) bool {
+	cmd := exec.Command("jj", "repo", "info", "--repository", path)
+	return cmd.Run() == nil
 }
 
 // scanSingleFileTag scans a single file, removing previous entries for that file
