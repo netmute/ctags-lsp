@@ -428,7 +428,8 @@ func handleRequest(server *Server, req RPCRequest) {
 		handleDocumentSymbol(server, req)
 	default:
 		// Method not found
-		sendError(req.ID, -32601, "Method not found", nil)
+		message := fmt.Sprintf("Method not found: %s", req.Method)
+		sendError(req.ID, -32601, message, nil)
 	}
 }
 
