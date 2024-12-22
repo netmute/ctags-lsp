@@ -426,6 +426,12 @@ func handleRequest(server *Server, req RPCRequest) {
 		handleWorkspaceSymbol(server, req)
 	case "textDocument/documentSymbol":
 		handleDocumentSymbol(server, req)
+	case "$/cancelRequest":
+		handleCancelRequest(server, req)
+	case "$/setTrace":
+		handleSetTrace(server, req)
+	case "$/logTrace":
+		handleLogTrace(server, req)
 	default:
 		// Method not found
 		message := fmt.Sprintf("Method not found: %s", req.Method)
@@ -495,6 +501,25 @@ func handleShutdown(_ *Server, req RPCRequest) {
 // handleExit processes the 'exit' notification
 func handleExit(_ *Server, _ RPCRequest) {
 	os.Exit(0)
+}
+
+// handleCancelRequest processes the '$/cancelRequest' notification
+// (For canceling in-progress requests)
+func handleCancelRequest(_ *Server, _ RPCRequest) {
+	// Not currently in use
+}
+
+// handleSetTrace() processes the '$/setTrace' notification
+// (Controls trace output level)
+func handleSetTrace(_ *Server, req RPCRequest) {
+	// Not currently in use
+	sendResult(req.ID, nil)
+}
+
+// handleLogTrace() processes the '$/logTrace' notification
+// (For transmitting trace data)
+func handleLogTrace(_ *Server, _ RPCRequest) {
+	// Not currently in use
 }
 
 // handleDidOpen processes the 'textDocument/didOpen' notification
