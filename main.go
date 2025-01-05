@@ -291,12 +291,40 @@ func main() {
 		os.Exit(0)
 	}
 
+	if config.benchmark {
+		// Mock the server
+		server := &Server{
+			cache: FileCache{
+				content: make(map[string][]string),
+			},
+		}
+
+		// Mock the JSON-RPC request for 'initialize'
+		mockID := json.RawMessage(`1`)
+		mockParams := InitializeParams{RootURI: ""}
+		mockParamsBytes, _ := json.Marshal(mockParams)
+
+		mockReq := RPCRequest{
+			Jsonrpc: "2.0",
+			ID:      mockID,
+			Method:  "initialize",
+			Params:  mockParamsBytes,
+		}
+
+		// Run ctags on the project
+		handleInitialize(server, mockReq)
+
+		// Exit immediately after initialize
+		os.Exit(0)
+	}
+
 	server := &Server{
 		cache: FileCache{
 			content: make(map[string][]string),
 		},
 	}
 
+	// Main loop to handle LSP messages
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		req, err := readMessage(reader)
@@ -357,6 +385,7 @@ func readMessage(reader *bufio.Reader) (RPCRequest, error) {
 type Config struct {
 	showHelp    bool
 	showVersion bool
+	benchmark   bool
 }
 
 func parseFlags() *Config {
@@ -367,6 +396,8 @@ func parseFlags() *Config {
 			config.showHelp = true
 		case "-v", "--version":
 			config.showVersion = true
+		case "--benchmark":
+			config.benchmark = true
 		}
 	}
 	return config
