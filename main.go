@@ -46,6 +46,7 @@ type InitializeParams struct {
 // InitializeResult represents the result of the 'initialize' request
 type InitializeResult struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
+	Info         ServerInfo         `json:"serverInfo"`
 }
 
 // ServerCapabilities defines the capabilities of the language server
@@ -55,6 +56,12 @@ type ServerCapabilities struct {
 	DefinitionProvider      bool                     `json:"definitionProvider,omitempty"`
 	WorkspaceSymbolProvider bool                     `json:"workspaceSymbolProvider,omitempty"`
 	DocumentSymbolProvider  bool                     `json:"documentSymbolProvider,omitempty"`
+}
+
+// ServerInfo defines the server name and version
+type ServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // TextDocumentSyncOptions defines options for text document synchronization
@@ -481,6 +488,10 @@ func handleInitialize(server *Server, req RPCRequest) {
 			WorkspaceSymbolProvider: true,
 			DefinitionProvider:      true,
 			DocumentSymbolProvider:  true,
+		},
+		Info: ServerInfo{
+			Name:    "ctags-lsp",
+			Version: version,
 		},
 	}
 
