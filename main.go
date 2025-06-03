@@ -27,15 +27,15 @@ type RPCRequest struct {
 type RPCResponse struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
-	Result  interface{}     `json:"result,omitempty"`
+	Result  any             `json:"result,omitempty"`
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
 // RPCError represents a JSON-RPC error object
 type RPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // InitializeParams represents parameters for the 'initialize' request
@@ -901,7 +901,7 @@ func findSymbolRangeInFile(lines []string, symbolName string, lineNumber int) Ra
 }
 
 // sendResult sends a successful JSON-RPC response
-func sendResult(id json.RawMessage, result interface{}) {
+func sendResult(id json.RawMessage, result any) {
 	response := RPCResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
@@ -911,7 +911,7 @@ func sendResult(id json.RawMessage, result interface{}) {
 }
 
 // sendError sends an error JSON-RPC response
-func sendError(id json.RawMessage, code int, message string, data interface{}) {
+func sendError(id json.RawMessage, code int, message string, data any) {
 	response := RPCResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
