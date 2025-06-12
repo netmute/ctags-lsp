@@ -27,15 +27,15 @@ type RPCRequest struct {
 type RPCResponse struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
-	Result  interface{}     `json:"result,omitempty"`
+	Result  any             `json:"result,omitempty"`
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
 // RPCError represents a JSON-RPC error object
 type RPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // InitializeParams represents parameters for the 'initialize' request
@@ -46,6 +46,7 @@ type InitializeParams struct {
 // InitializeResult represents the result of the 'initialize' request
 type InitializeResult struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
+	Info         ServerInfo         `json:"serverInfo"`
 }
 
 // ServerCapabilities defines the capabilities of the language server
@@ -55,6 +56,12 @@ type ServerCapabilities struct {
 	DefinitionProvider      bool                     `json:"definitionProvider,omitempty"`
 	WorkspaceSymbolProvider bool                     `json:"workspaceSymbolProvider,omitempty"`
 	DocumentSymbolProvider  bool                     `json:"documentSymbolProvider,omitempty"`
+}
+
+// ServerInfo defines the server name and version
+type ServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // TextDocumentSyncOptions defines options for text document synchronization
@@ -482,6 +489,10 @@ func handleInitialize(server *Server, req RPCRequest) {
 			DefinitionProvider:      true,
 			DocumentSymbolProvider:  true,
 		},
+		Info: ServerInfo{
+			Name:    "ctags-lsp",
+			Version: version,
+		},
 	}
 
 	sendResult(req.ID, result)
@@ -901,7 +912,7 @@ func findSymbolRangeInFile(lines []string, symbolName string, lineNumber int) Ra
 }
 
 // sendResult sends a successful JSON-RPC response
-func sendResult(id json.RawMessage, result interface{}) {
+func sendResult(id json.RawMessage, result any) {
 	response := RPCResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
@@ -911,7 +922,7 @@ func sendResult(id json.RawMessage, result interface{}) {
 }
 
 // sendError sends an error JSON-RPC response
-func sendError(id json.RawMessage, code int, message string, data interface{}) {
+func sendError(id json.RawMessage, code int, message string, data any) {
 	response := RPCResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
