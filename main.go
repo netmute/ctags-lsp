@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -995,46 +996,79 @@ func filepathToURI(path string) string {
 	return "file://" + filepath.ToSlash(absPath)
 }
 
-// scanWorkspace scans all files in the root path
+// scanWorkspace runs ctags on the workspace using parallel chunks for performance.
 func (s *Server) scanWorkspace() error {
-	var cmd *exec.Cmd
-
-	// Respect gitignore, fallback to all files
-	if isGitRepo(s.rootPath) {
-		// Use `git ls-files` to generate file list and pipe to ctags
-		cmd = pipeCommand("git", []string{"ls-files"}, "ctags", []string{"--output-format=json", "--fields=+n", "-L", "-"})
-	} else if isJjRepo(s.rootPath) {
-		// Use `jj file list` to generate file list and pipe to ctags
-		cmd = pipeCommand("jj", []string{"file", "list", "--repository", "."}, "ctags", []string{"--output-format=json", "--fields=+n", "-L", "-"})
-	} else {
-		// Fallback to `ctags -R`
-		cmd = exec.Command("ctags", "--output-format=json", "--fields=+n", "-R")
-		cmd.Dir = s.rootPath
+	files, err := listWorkspaceFiles(s.rootPath)
+	if err != nil {
+		return err
 	}
 
-	return s.processTagsOutput(cmd)
+	workers := runtime.NumCPU()
+	size := (len(files) + workers - 1) / workers // calculate chunk size
+	var wg sync.WaitGroup
+
+	// start workers on file chunks
+	for i := 0; i < workers; i++ {
+		start := i * size
+		if start >= len(files) {
+			break
+		}
+		end := start + size
+		if end > len(files) {
+			end = len(files)
+		}
+		chunk := files[start:end]
+
+		wg.Add(1)
+		go func(chunk []string) {
+			defer wg.Done()
+
+			// run ctags with input from chunk
+			cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", "-L", "-")
+			cmd.Dir = s.rootPath
+			cmd.Stdin = strings.NewReader(strings.Join(chunk, "\n"))
+
+			if err := s.processTagsOutput(cmd); err != nil {
+				log.Printf("ctags error: %v", err)
+			}
+		}(chunk)
+	}
+
+	wg.Wait() // wait for all workers
+	return nil
 }
 
-// pipeCommand creates a command to pipe output from one command to another
-func pipeCommand(producerCmd string, producerArgs []string, consumerCmd string, consumerArgs []string) *exec.Cmd {
-	producer := exec.Command(producerCmd, producerArgs...)
-	consumer := exec.Command(consumerCmd, consumerArgs...)
-
-	// Pipe producer's stdout to consumer's stdin
-	pipe, err := producer.StdoutPipe()
-	if err != nil {
-		log.Fatalf("Failed to create pipe between commands: %v", err)
-	}
-	consumer.Stdin = pipe
-
-	// Start the producer when the consumer is executed
-	go func() {
-		if err := producer.Start(); err != nil {
-			log.Fatalf("Failed to start producer command (%s): %v", producerCmd, err)
+// listWorkspaceFiles returns a list of relative file paths using git, jj, or a directory walk.
+func listWorkspaceFiles(root string) ([]string, error) {
+	// check git repo
+	if isGitRepo(root) {
+		out, err := exec.Command("git", "-C", root, "ls-files").Output()
+		if err != nil {
+			return nil, err
 		}
-	}()
+		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	}
 
-	return consumer
+	// check jujutsu repo
+	if isJjRepo(root) {
+		out, err := exec.Command("jj", "file", "list", "--repository", root).Output()
+		if err != nil {
+			return nil, err
+		}
+		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	}
+
+	// fallback: walk directory tree
+	var files []string
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if rel, e := filepath.Rel(root, path); e == nil {
+				files = append(files, rel)
+			}
+		}
+		return nil
+	})
+	return files, nil
 }
 
 // isGitRepo checks if the directory is a Git repository
