@@ -357,8 +357,8 @@ func readMessage(reader *bufio.Reader) (RPCRequest, error) {
 		if line == "\r" {
 			break // End of headers
 		}
-		if strings.HasPrefix(line, "Content-Length:") {
-			clStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+		if after, ok := strings.CutPrefix(line, "Content-Length:"); ok {
+			clStr := strings.TrimSpace(after)
 			cl, err := strconv.Atoi(clStr)
 			if err != nil {
 				return RPCRequest{}, fmt.Errorf("invalid Content-Length: %v", err)
@@ -981,8 +981,8 @@ func sendResponse(resp RPCResponse) {
 
 // uriToPath converts a file URI to a filesystem path
 func uriToPath(uri string) string {
-	if strings.HasPrefix(uri, "file://") {
-		return filepath.FromSlash(strings.TrimPrefix(uri, "file://"))
+	if after, ok := strings.CutPrefix(uri, "file://"); ok {
+		return filepath.FromSlash(after)
 	}
 	return uri
 }
@@ -1008,15 +1008,12 @@ func (s *Server) scanWorkspace() error {
 	var wg sync.WaitGroup
 
 	// start workers on file chunks
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		start := i * size
 		if start >= len(files) {
 			break
 		}
-		end := start + size
-		if end > len(files) {
-			end = len(files)
-		}
+		end := min(start+size, len(files))
 		chunk := files[start:end]
 
 		wg.Add(1)
