@@ -1035,8 +1035,16 @@ func (s *Server) scanWorkspace() error {
 	return nil
 }
 
-// listWorkspaceFiles returns a list of relative file paths using git, jj, or a directory walk.
+// listWorkspaceFiles returns a list of relative file paths using tags file, git, jj, or a directory walk.
 func listWorkspaceFiles(root string) ([]string, error) {
+	// check for existing tags files first
+	if tagsPath, found := findTagsFile(root); found {
+		if files, err := parseTagsFileForFiles(tagsPath); err == nil {
+			return files, nil
+		}
+		// If parsing fails, continue with other methods
+	}
+
 	// check git repo
 	if isGitRepo(root) {
 		out, err := exec.Command("git", "-C", root, "ls-files").Output()
@@ -1065,6 +1073,68 @@ func listWorkspaceFiles(root string) ([]string, error) {
 		}
 		return nil
 	})
+	return files, nil
+}
+
+// findTagsFile checks for existing tags files and returns the first one found
+func findTagsFile(root string) (string, bool) {
+	// Common tags file locations in order of preference
+	tagsLocations := []string{
+		"tags",
+		".tags",
+		".git/tags",
+	}
+
+	for _, location := range tagsLocations {
+		tagsPath := filepath.Join(root, location)
+		if _, err := os.Stat(tagsPath); err == nil {
+			return tagsPath, true
+		}
+	}
+
+	return "", false
+}
+
+// parseTagsFileForFiles reads a tags file and extracts unique file paths
+func parseTagsFileForFiles(tagsPath string) ([]string, error) {
+	file, err := os.Open(tagsPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	fileSet := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments (lines starting with !)
+		if line == "" || strings.HasPrefix(line, "!") {
+			continue
+		}
+
+		// Parse ctags format: symbol<tab>filename<tab>pattern
+		fields := strings.Split(line, "\t")
+		if len(fields) >= 2 {
+			filename := fields[1]
+			// Only include files that actually exist
+			if filename != "" {
+				fileSet[filename] = true
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Convert map to slice
+	files := make([]string, 0, len(fileSet))
+	for file := range fileSet {
+		files = append(files, file)
+	}
+
 	return files, nil
 }
 
