@@ -1105,6 +1105,7 @@ func parseTagsFileForFiles(tagsPath string) ([]string, error) {
 
 	fileSet := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
+	tagsDir := filepath.Dir(tagsPath)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1118,8 +1119,11 @@ func parseTagsFileForFiles(tagsPath string) ([]string, error) {
 		fields := strings.Split(line, "\t")
 		if len(fields) >= 2 {
 			filename := fields[1]
-			// Only include files that actually exist
 			if filename != "" {
+				// Convert relative paths to absolute, then back to relative from tags dir
+				if !filepath.IsAbs(filename) {
+					filename = filepath.Clean(filepath.Join(tagsDir, filename))
+				}
 				fileSet[filename] = true
 			}
 		}
