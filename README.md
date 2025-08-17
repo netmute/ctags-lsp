@@ -4,7 +4,7 @@ A Language Server Protocol (LSP) implementation using `universal-ctags` as backe
 
 This won't replace your dedicated language server, and it doesn't try to. The goal is to have a "better than nothing" language server that's trivial to setup for any language.
 
-# Features
+## Features
 
 - **Code completion** with (naive) context awareness
 - **Go-to-definition** across workspace
