@@ -1,8 +1,17 @@
 # CTags Language Server
 
-A Language Server Protocol (LSP) implementation using `universal-ctags` for code completion and go-to definition.
+A Language Server Protocol (LSP) implementation using `universal-ctags` as backend, supporting 100+ languages.
 
 This won't replace your dedicated language server, and it doesn't try to. The goal is to have a "better than nothing" language server that's trivial to setup for any language.
+
+# Features
+
+- **Code completion** with (naive) context awareness
+- **Go-to-definition** across workspace
+- **Symbol search** (workspace and document)
+- **100+ languages** supported via ctags
+- **Zero configuration** - tries to do the most sensible thing at any point
+- **Fast indexing** with parallel processing
 
 ## Installation
 
@@ -47,3 +56,6 @@ command = "ctags-lsp"
 name = "toml"  # Or whatever language you want to use it for
 language-servers = [ "ctags-lsp" ]
 ```
+
+#### VS Code
+I really can't tell. PRs welcome.
