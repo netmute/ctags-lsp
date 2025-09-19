@@ -32,18 +32,19 @@ go install github.com/netmute/ctags-lsp@latest
 ## Use
 
 #### Neovim
-There is a plugin for easy integration: [netmute/ctags-lsp.nvim](https://github.com/netmute/ctags-lsp.nvim)
 ```lua
 -- lazy.nvim
 {
-    "neovim/nvim-lspconfig",
-    dependencies = "netmute/ctags-lsp.nvim",
-    config = function()
-        require("lspconfig").ctags_lsp.setup({
-            filetypes = { "ruby" }, -- Or whatever language you want to use it for
-        })
-    end,
-}
+	"neovim/nvim-lspconfig",
+	config = function()
+		vim.lsp.config("ctags_lsp", {
+			cmd = { "ctags-lsp" },
+			filetypes = { "ruby" }, -- Or whatever language you want to use it for
+			root_dir = vim.uv.cwd(),
+		})
+		vim.lsp.enable("ctags_lsp")
+	end,
+},
 ```
 
 #### Helix
