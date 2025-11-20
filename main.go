@@ -497,7 +497,11 @@ func handleInitialize(server *Server, req RPCRequest) {
 		server.rootPath = cwd
 	} else {
 		// Convert RootURI to filesystem path
-		server.rootPath = uriToPath(params.RootURI)
+		rootPath := params.RootURI
+		if after, ok := strings.CutPrefix(rootPath, "file://"); ok {
+			rootPath = filepath.FromSlash(after)
+		}
+		server.rootPath = rootPath
 	}
 
 	// Load ctags entries
@@ -573,12 +577,17 @@ func handleDidOpen(server *Server, req RPCRequest) {
 		return
 	}
 
-	uri := params.TextDocument.URI
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		log.Printf("Failed to normalize path for didOpen: %v", err)
+		return
+	}
+
 	content := strings.Split(params.TextDocument.Text, "\n")
 
 	// Cache the opened document's content
 	server.cache.mu.Lock()
-	server.cache.content[uriToPath(uri)] = content
+	server.cache.content[filePath] = content
 	server.cache.mu.Unlock()
 }
 
@@ -590,12 +599,17 @@ func handleDidChange(server *Server, req RPCRequest) {
 		return
 	}
 
-	uri := params.TextDocument.URI
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		log.Printf("Failed to normalize path for didChange: %v", err)
+		return
+	}
+
 	if len(params.ContentChanges) > 0 {
 		content := strings.Split(params.ContentChanges[0].Text, "\n")
 		// Update the cached content
 		server.cache.mu.Lock()
-		server.cache.content[uriToPath(uri)] = content
+		server.cache.content[filePath] = content
 		server.cache.mu.Unlock()
 	}
 }
@@ -608,10 +622,15 @@ func handleDidClose(server *Server, req RPCRequest) {
 		return
 	}
 
-	uri := params.TextDocument.URI
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		log.Printf("Failed to normalize path for didClose: %v", err)
+		return
+	}
+
 	// Remove the document from cache
 	server.cache.mu.Lock()
-	delete(server.cache.content, uriToPath(uri))
+	delete(server.cache.content, filePath)
 	server.cache.mu.Unlock()
 }
 
@@ -623,8 +642,11 @@ func handleDidSave(server *Server, req RPCRequest) {
 		return
 	}
 
-	// Get file path from URI
-	filePath := uriToPath(params.TextDocument.URI)
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		log.Printf("Failed to normalize path for didSave: %v", err)
+		return
+	}
 
 	// Scan the file again
 	if err := server.scanSingleFileTag(filePath); err != nil {
@@ -641,12 +663,16 @@ func handleCompletion(server *Server, req RPCRequest) {
 		return
 	}
 
-	currentFilePath := uriToPath(params.TextDocument.URI)
-	currentFileExt := filepath.Ext(currentFilePath)
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		sendError(req.ID, -32603, "Internal error", err.Error())
+		return
+	}
+	currentFileExt := filepath.Ext(filePath)
 
 	// Get the line content and check if the character before the cursor is a dot
 	server.cache.mu.RLock()
-	lines, ok := server.cache.content[currentFilePath]
+	lines, ok := server.cache.content[filePath]
 	server.cache.mu.RUnlock()
 
 	if !ok || params.Position.Line >= len(lines) {
@@ -663,7 +689,7 @@ func handleCompletion(server *Server, req RPCRequest) {
 	}
 
 	// Retrieve the current word at the cursor position
-	word, err := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	word, err := server.getCurrentWord(filePath, params.Position)
 	if err != nil {
 		sendResult(req.ID, CompletionList{
 			IsIncomplete: false,
@@ -738,8 +764,14 @@ func handleDefinition(server *Server, req RPCRequest) {
 		return
 	}
 
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		sendError(req.ID, -32603, "Internal error", err.Error())
+		return
+	}
+
 	// Get the current word at the given position
-	symbol, err := server.getCurrentWord(params.TextDocument.URI, params.Position)
+	symbol, err := server.getCurrentWord(filePath, params.Position)
 	if err != nil {
 		sendResult(req.ID, nil) // No symbol found at position or error occurred
 		return
@@ -753,13 +785,16 @@ func handleDefinition(server *Server, req RPCRequest) {
 	for _, entry := range server.tagEntries {
 		if entry.Name == symbol {
 			// Create a Location for the symbol's definition
-			filePath := filepath.Join(server.rootPath, entry.Path)
-			uri := filepathToURI(filePath)
+			uri, err := relativePathToAbsoluteURI(server.rootPath, entry.Path)
+			if err != nil {
+				log.Printf("Failed to build URI for %s: %v", entry.Path, err)
+				continue
+			}
 
 			// Use the refactored method to get file content
-			content, err := server.cache.GetOrLoadFileContent(filePath)
+			content, err := server.cache.GetOrLoadFileContent(entry.Path)
 			if err != nil {
-				log.Printf("Failed to get content for file %s: %v", filePath, err)
+				log.Printf("Failed to get content for file %s: %v", entry.Path, err)
 				continue
 			}
 
@@ -806,13 +841,16 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 				// This tag has no symbol kind, skip
 				continue
 			}
-			filePath := filepath.Join(server.rootPath, entry.Path)
-			uri := filepathToURI(filePath)
+			uri, err := relativePathToAbsoluteURI(server.rootPath, entry.Path)
+			if err != nil {
+				log.Printf("Failed to build URI for %s: %v", entry.Path, err)
+				continue
+			}
 
 			// Use the refactored method to get file content
-			content, err := server.cache.GetOrLoadFileContent(filePath)
+			content, err := server.cache.GetOrLoadFileContent(entry.Path)
 			if err != nil {
-				log.Printf("Failed to get content for file %s: %v", filePath, err)
+				log.Printf("Failed to get content for file %s: %v", entry.Path, err)
 				continue
 			}
 
@@ -844,7 +882,11 @@ func handleDocumentSymbol(server *Server, req RPCRequest) {
 		return
 	}
 
-	filePath := uriToPath(params.TextDocument.URI)
+	filePath, err := toRootRelativePath(server.rootPath, params.TextDocument.URI)
+	if err != nil {
+		sendError(req.ID, -32603, "Internal error", err.Error())
+		return
+	}
 
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -852,21 +894,7 @@ func handleDocumentSymbol(server *Server, req RPCRequest) {
 	var symbols []SymbolInformation
 
 	for _, entry := range server.tagEntries {
-		// Check if the symbol belongs to the requested document
-		absolutePath := filepath.Join(server.rootPath, entry.Path)
-		absolutePath, err := filepath.Abs(absolutePath)
-		if err != nil {
-			log.Printf("Failed to get absolute path for %s: %v", entry.Path, err)
-			continue
-		}
-
-		requestedPath, err := filepath.Abs(filePath)
-		if err != nil {
-			log.Printf("Failed to get absolute path for %s: %v", filePath, err)
-			continue
-		}
-
-		if absolutePath != requestedPath {
+		if entry.Path != filePath {
 			continue
 		}
 
@@ -876,12 +904,16 @@ func handleDocumentSymbol(server *Server, req RPCRequest) {
 			continue
 		}
 
-		uri := filepathToURI(absolutePath)
+		uri, err := relativePathToAbsoluteURI(server.rootPath, entry.Path)
+		if err != nil {
+			log.Printf("Failed to build URI for %s: %v", entry.Path, err)
+			continue
+		}
 
 		// Retrieve file content
-		content, err := server.cache.GetOrLoadFileContent(absolutePath)
+		content, err := server.cache.GetOrLoadFileContent(entry.Path)
 		if err != nil {
-			log.Printf("Failed to get content for file %s: %v", absolutePath, err)
+			log.Printf("Failed to get content for file %s: %v", entry.Path, err)
 			continue
 		}
 
@@ -979,21 +1011,55 @@ func sendResponse(resp RPCResponse) {
 	fmt.Printf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
 }
 
-// uriToPath converts a file URI to a filesystem path
-func uriToPath(uri string) string {
-	if after, ok := strings.CutPrefix(uri, "file://"); ok {
-		return filepath.FromSlash(after)
+// toRootRelativePath converts file URIs, absolute, or relative paths to a root-relative path.
+func toRootRelativePath(rootPath, raw string) (string, error) {
+	if after, ok := strings.CutPrefix(raw, "file://"); ok {
+		raw = filepath.FromSlash(after)
 	}
-	return uri
+
+	clean := filepath.Clean(raw)
+
+	if filepath.IsAbs(clean) {
+		rel, err := filepath.Rel(rootPath, clean)
+		if err != nil {
+			return "", fmt.Errorf("make relative: %w", err)
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, "..") {
+			return "", fmt.Errorf("path outside root: %q", clean)
+		}
+		return rel, nil
+	}
+
+	rel := filepath.ToSlash(clean)
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path outside root: %q", rel)
+	}
+	return rel, nil
 }
 
-// filepathToURI converts a filesystem path to a file URI
-func filepathToURI(path string) string {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return ""
+// tagfilePathToRootRelative takes a path from a tags file, interprets it relative to the tagfile directory if needed,
+// and returns it as a root-relative path.
+func tagfilePathToRootRelative(rootPath, tagsPath, raw string) (string, error) {
+	if after, ok := strings.CutPrefix(raw, "file://"); ok {
+		raw = filepath.FromSlash(after)
 	}
-	return "file://" + filepath.ToSlash(absPath)
+
+	clean := filepath.Clean(raw)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Clean(filepath.Join(filepath.Dir(tagsPath), clean))
+	}
+
+	return toRootRelativePath(rootPath, clean)
+}
+
+// relativePathToAbsoluteURI builds a file URI from a root-relative path.
+func relativePathToAbsoluteURI(rootPath, rel string) (string, error) {
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path outside root: %q", rel)
+	}
+	absPath := filepath.Clean(filepath.Join(rootPath, filepath.FromSlash(rel)))
+	return "file://" + filepath.ToSlash(absPath), nil
 }
 
 // scanWorkspace runs ctags on the workspace using parallel chunks for performance.
@@ -1040,7 +1106,7 @@ func listWorkspaceFiles(root string) ([]string, error) {
 	// check for existing tags files first
 	if tagsPath, found := findTagsFile(root); found {
 		if files, err := parseTagsFileForFiles(tagsPath); err == nil {
-			return files, nil
+			return workspaceTagfilePathsToRootRelative(root, tagsPath, files)
 		}
 		// If parsing fails, continue with other methods
 	}
@@ -1051,7 +1117,8 @@ func listWorkspaceFiles(root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+		files := strings.Split(strings.TrimSpace(string(out)), "\n")
+		return workspacePathsToRootRelative(root, files)
 	}
 
 	// check jujutsu repo
@@ -1060,7 +1127,8 @@ func listWorkspaceFiles(root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+		files := strings.Split(strings.TrimSpace(string(out)), "\n")
+		return workspacePathsToRootRelative(root, files)
 	}
 
 	// fallback: walk directory tree
@@ -1073,7 +1141,35 @@ func listWorkspaceFiles(root string) ([]string, error) {
 		}
 		return nil
 	})
-	return files, nil
+	return workspacePathsToRootRelative(root, files)
+}
+
+// workspacePathsToRootRelative converts general workspace paths to root-relative form.
+// Used only by listWorkspaceFiles for non-tagfile sources.
+func workspacePathsToRootRelative(rootPath string, paths []string) ([]string, error) {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		rel, err := toRootRelativePath(rootPath, path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rel)
+	}
+	return out, nil
+}
+
+// workspaceTagfilePathsToRootRelative handles tagfile entries that may be relative to the tagfile directory,
+// then converts them to root-relative form. Used only by listWorkspaceFiles.
+func workspaceTagfilePathsToRootRelative(rootPath, tagsPath string, paths []string) ([]string, error) {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		rel, err := tagfilePathToRootRelative(rootPath, tagsPath, path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rel)
+	}
+	return out, nil
 }
 
 // findTagsFile checks for existing tags files and returns the first one found
@@ -1095,7 +1191,7 @@ func findTagsFile(root string) (string, bool) {
 	return "", false
 }
 
-// parseTagsFileForFiles reads a tags file and extracts unique file paths
+// parseTagsFileForFiles reads a tags file and extracts unique file paths as they appear (absolute or relative to the tags file).
 func parseTagsFileForFiles(tagsPath string) ([]string, error) {
 	file, err := os.Open(tagsPath)
 	if err != nil {
@@ -1105,7 +1201,6 @@ func parseTagsFileForFiles(tagsPath string) ([]string, error) {
 
 	fileSet := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
-	tagsDir := filepath.Dir(tagsPath)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1120,10 +1215,6 @@ func parseTagsFileForFiles(tagsPath string) ([]string, error) {
 		if len(fields) >= 2 {
 			filename := fields[1]
 			if filename != "" {
-				// Convert relative paths to absolute, then back to relative from tags dir
-				if !filepath.IsAbs(filename) {
-					filename = filepath.Clean(filepath.Join(tagsDir, filename))
-				}
 				fileSet[filename] = true
 			}
 		}
@@ -1156,25 +1247,22 @@ func isJjRepo(path string) bool {
 
 // scanSingleFileTag scans a single file, removing previous entries for that file
 func (s *Server) scanSingleFileTag(filePath string) error {
-	s.mu.Lock()
-	// Convert filePath to relative path
-	relPath, err := filepath.Rel(s.rootPath, filePath)
-	if err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("failed to make file path relative: %v", err)
+	if strings.HasPrefix(filePath, "..") {
+		return fmt.Errorf("path outside root: %s", filePath)
 	}
 
+	s.mu.Lock()
 	// Remove previous entries for that file
 	newEntries := make([]TagEntry, 0, len(s.tagEntries))
 	for _, entry := range s.tagEntries {
-		if entry.Path != relPath {
+		if entry.Path != filePath {
 			newEntries = append(newEntries, entry)
 		}
 	}
 	s.tagEntries = newEntries
 	s.mu.Unlock()
 
-	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", relPath)
+	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", filePath)
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
@@ -1200,7 +1288,7 @@ func (s *Server) processTagsOutput(cmd *exec.Cmd) error {
 		}
 
 		// Normalize the Path to be relative to rootPath
-		relPath, err := filepath.Rel(s.rootPath, filepath.Join(s.rootPath, entry.Path))
+		relPath, err := toRootRelativePath(s.rootPath, entry.Path)
 		if err != nil {
 			log.Printf("Failed to make path relative for %s: %v", entry.Path, err)
 			continue
@@ -1226,8 +1314,8 @@ func (s *Server) processTagsOutput(cmd *exec.Cmd) error {
 }
 
 // getCurrentWord retrieves the current word at the given position in the document
-func (s *Server) getCurrentWord(uri string, pos Position) (string, error) {
-	filePath := uriToPath(uri)
+// using a root-relative file path.
+func (s *Server) getCurrentWord(filePath string, pos Position) (string, error) {
 	lines, err := s.cache.GetOrLoadFileContent(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to load file content: %v", err)
