@@ -196,6 +196,7 @@ type Server struct {
 	rootPath    string
 	cache       FileCache
 	initialized bool
+	ctagsBin    string
 	mu          sync.Mutex
 }
 
@@ -260,11 +261,11 @@ func getInstallInstructions() string {
 }
 
 // checkCtagsInstallation verifies that Universal Ctags is installed and supports required features
-func checkCtagsInstallation() error {
-	cmd := exec.Command("ctags", "--version", "--output-format=json")
+func checkCtagsInstallation(ctagsBin string) error {
+	cmd := exec.Command(ctagsBin, "--version", "--output-format=json")
 	output, err := cmd.Output()
 	if err != nil || !strings.Contains(string(output), "Universal Ctags") {
-		return fmt.Errorf("ctags command not found or incorrect version. Universal Ctags with JSON support is required.\n%s", getInstallInstructions())
+		return fmt.Errorf("%s command not found or incorrect version. Universal Ctags with JSON support is required.\n%s", ctagsBin, getInstallInstructions())
 	}
 
 	return nil
@@ -277,7 +278,7 @@ func main() {
 	config := parseFlags()
 
 	// Check for ctags installation before proceeding
-	if err := checkCtagsInstallation(); err != nil {
+	if err := checkCtagsInstallation(config.ctagsBin); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -298,6 +299,7 @@ func main() {
 			cache: FileCache{
 				content: make(map[string][]string),
 			},
+			ctagsBin: config.ctagsBin,
 		}
 
 		// Mock the JSON-RPC request for 'initialize'
@@ -323,6 +325,7 @@ func main() {
 		cache: FileCache{
 			content: make(map[string][]string),
 		},
+		ctagsBin: config.ctagsBin,
 	}
 
 	// Main loop to handle LSP messages
@@ -387,11 +390,14 @@ type Config struct {
 	showHelp    bool
 	showVersion bool
 	benchmark   bool
+	ctagsBin    string
 }
 
 func parseFlags() *Config {
-	config := &Config{}
-	for _, arg := range os.Args[1:] {
+	config := &Config{
+		ctagsBin: "ctags", // Default value
+	}
+	for i, arg := range os.Args[1:] {
 		switch arg {
 		case "-h", "--help":
 			config.showHelp = true
@@ -399,6 +405,11 @@ func parseFlags() *Config {
 			config.showVersion = true
 		case "--benchmark":
 			config.benchmark = true
+		case "--ctags-bin":
+			// Get the next argument as the binary name
+			if i+1 < len(os.Args[1:]) {
+				config.ctagsBin = os.Args[i+2]
+			}
 		}
 	}
 	return config
@@ -412,8 +423,9 @@ Usage:
   %s [options]
 
 Options:
-  -h, --help     Show this help message
-  -v, --version  Show version information
+  -h, --help           Show this help message
+  -v, --version        Show version information
+  --ctags-bin <name>   Specify the ctags binary name (default: "ctags")
 `, os.Args[0])
 }
 
@@ -1087,7 +1099,7 @@ func (s *Server) scanWorkspace() error {
 			defer wg.Done()
 
 			// run ctags with input from chunk
-			cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", "-L", "-")
+			cmd := exec.Command(s.ctagsBin, "--output-format=json", "--fields=+n", "-L", "-")
 			cmd.Dir = s.rootPath
 			cmd.Stdin = strings.NewReader(strings.Join(chunk, "\n"))
 
@@ -1262,7 +1274,7 @@ func (s *Server) scanSingleFileTag(filePath string) error {
 	s.tagEntries = newEntries
 	s.mu.Unlock()
 
-	cmd := exec.Command("ctags", "--output-format=json", "--fields=+n", filePath)
+	cmd := exec.Command(s.ctagsBin, "--output-format=json", "--fields=+n", filePath)
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
