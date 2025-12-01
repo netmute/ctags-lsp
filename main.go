@@ -847,39 +847,41 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 	defer server.mu.Unlock()
 
 	for _, entry := range server.tagEntries {
-		if entry.Name == query {
-			kind, err := GetLSPSymbolKind(entry.Kind)
-			if err != nil {
-				// This tag has no symbol kind, skip
-				continue
-			}
-			uri, err := relativePathToAbsoluteURI(server.rootPath, entry.Path)
-			if err != nil {
-				log.Printf("Failed to build URI for %s: %v", entry.Path, err)
-				continue
-			}
-
-			// Use the refactored method to get file content
-			content, err := server.cache.GetOrLoadFileContent(entry.Path)
-			if err != nil {
-				log.Printf("Failed to get content for file %s: %v", entry.Path, err)
-				continue
-			}
-
-			// Find the symbol's range within the file
-			symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
-
-			symbol := SymbolInformation{
-				Name: entry.Name,
-				Kind: kind,
-				Location: Location{
-					URI:   uri,
-					Range: symbolRange,
-				},
-				ContainerName: entry.Scope,
-			}
-			symbols = append(symbols, symbol)
+		if query != "" && entry.Name != query {
+			continue
 		}
+
+		kind, err := GetLSPSymbolKind(entry.Kind)
+		if err != nil {
+			// This tag has no symbol kind, skip
+			continue
+		}
+		uri, err := relativePathToAbsoluteURI(server.rootPath, entry.Path)
+		if err != nil {
+			log.Printf("Failed to build URI for %s: %v", entry.Path, err)
+			continue
+		}
+
+		// Use the refactored method to get file content
+		content, err := server.cache.GetOrLoadFileContent(entry.Path)
+		if err != nil {
+			log.Printf("Failed to get content for file %s: %v", entry.Path, err)
+			continue
+		}
+
+		// Find the symbol's range within the file
+		symbolRange := findSymbolRangeInFile(content, entry.Name, entry.Line)
+
+		symbol := SymbolInformation{
+			Name: entry.Name,
+			Kind: kind,
+			Location: Location{
+				URI:   uri,
+				Range: symbolRange,
+			},
+			ContainerName: entry.Scope,
+		}
+		symbols = append(symbols, symbol)
 	}
 
 	sendResult(req.ID, symbols)
