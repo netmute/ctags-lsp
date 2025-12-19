@@ -199,6 +199,7 @@ type Server struct {
 	cache       FileCache
 	initialized bool
 	ctagsBin    string
+	tagfilePath string
 	mu          sync.Mutex
 }
 
@@ -301,7 +302,8 @@ func main() {
 			cache: FileCache{
 				content: make(map[string][]string),
 			},
-			ctagsBin: config.ctagsBin,
+			ctagsBin:    config.ctagsBin,
+			tagfilePath: config.tagfilePath,
 		}
 
 		// Mock the JSON-RPC request for 'initialize'
@@ -327,7 +329,8 @@ func main() {
 		cache: FileCache{
 			content: make(map[string][]string),
 		},
-		ctagsBin: config.ctagsBin,
+		ctagsBin:    config.ctagsBin,
+		tagfilePath: config.tagfilePath,
 	}
 
 	// Main loop to handle LSP messages
@@ -393,6 +396,7 @@ type Config struct {
 	showVersion bool
 	benchmark   bool
 	ctagsBin    string
+	tagfilePath string
 }
 
 func parseFlags() *Config {
@@ -412,6 +416,10 @@ func parseFlags() *Config {
 			if i+1 < len(os.Args[1:]) {
 				config.ctagsBin = os.Args[i+2]
 			}
+		case "--tagfile":
+			if i+1 < len(os.Args[1:]) {
+				config.tagfilePath = os.Args[i+2]
+			}
 		}
 	}
 	return config
@@ -419,7 +427,7 @@ func parseFlags() *Config {
 
 func flagUsage() {
 	fmt.Printf(`CTags Language Server
-Provides LSP functionality using ctags JSON output.
+Provides LSP functionality based on ctags.
 
 Usage:
   %s [options]
@@ -427,7 +435,8 @@ Usage:
 Options:
   -h, --help           Show this help message
   -v, --version        Show version information
-  --ctags-bin <name>   Specify the ctags binary name (default: "ctags")
+  --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
+  --tagfile <path>     Use custom tagfile path (lsp looks by default in: "tags", ".tags" or ".git/tags")
 `, os.Args[0])
 }
 
@@ -1080,6 +1089,26 @@ func relativePathToAbsoluteURI(rootPath, rel string) (string, error) {
 
 // scanWorkspace runs ctags on the workspace using parallel chunks for performance.
 func (s *Server) scanWorkspace() error {
+	if s.tagfilePath != "" {
+		tagsPath := s.tagfilePath
+		if !filepath.IsAbs(tagsPath) {
+			tagsPath = filepath.Join(s.rootPath, tagsPath)
+		}
+		tagsPath = filepath.Clean(tagsPath)
+		if _, err := os.Stat(tagsPath); err != nil {
+			return fmt.Errorf("tagfile not found at %q: %v", tagsPath, err)
+		}
+		entries, err := parseTagfile(tagsPath, s.rootPath)
+		if err != nil {
+			return err
+		}
+
+		s.mu.Lock()
+		s.tagEntries = append(s.tagEntries, entries...)
+		s.mu.Unlock()
+		return nil
+	}
+
 	if tagsPath, found := findTagsFile(s.rootPath); found {
 		entries, err := parseTagfile(tagsPath, s.rootPath)
 		if err != nil {
