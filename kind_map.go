@@ -1,3 +1,5 @@
+// kind_map defines the mapping tables and helpers that translate ctags kind strings
+// into the LSP completion and symbol kinds used by the server.
 package main
 
 import "fmt"

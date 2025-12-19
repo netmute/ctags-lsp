@@ -1,3 +1,5 @@
+// main contains the LSP server implementation, request routing, and ctags scanning logic
+// used to provide completion, symbol, and definition features.
 package main
 
 import (
@@ -1078,6 +1080,18 @@ func relativePathToAbsoluteURI(rootPath, rel string) (string, error) {
 
 // scanWorkspace runs ctags on the workspace using parallel chunks for performance.
 func (s *Server) scanWorkspace() error {
+	if tagsPath, found := findTagsFile(s.rootPath); found {
+		entries, err := parseTagfile(tagsPath, s.rootPath)
+		if err != nil {
+			return err
+		}
+
+		s.mu.Lock()
+		s.tagEntries = append(s.tagEntries, entries...)
+		s.mu.Unlock()
+		return nil
+	}
+
 	files, err := listWorkspaceFiles(s.rootPath)
 	if err != nil {
 		return err
@@ -1115,16 +1129,8 @@ func (s *Server) scanWorkspace() error {
 	return nil
 }
 
-// listWorkspaceFiles returns a list of relative file paths using tags file, git, jj, or a directory walk.
+// listWorkspaceFiles returns a list of relative file paths using git, jj, or a directory walk.
 func listWorkspaceFiles(root string) ([]string, error) {
-	// check for existing tags files first
-	if tagsPath, found := findTagsFile(root); found {
-		if files, err := parseTagsFileForFiles(tagsPath); err == nil {
-			return workspaceTagfilePathsToRootRelative(root, tagsPath, files)
-		}
-		// If parsing fails, continue with other methods
-	}
-
 	// check git repo
 	if isGitRepo(root) {
 		out, err := exec.Command("git", "-C", root, "ls-files").Output()
@@ -1172,20 +1178,6 @@ func workspacePathsToRootRelative(rootPath string, paths []string) ([]string, er
 	return out, nil
 }
 
-// workspaceTagfilePathsToRootRelative handles tagfile entries that may be relative to the tagfile directory,
-// then converts them to root-relative form. Used only by listWorkspaceFiles.
-func workspaceTagfilePathsToRootRelative(rootPath, tagsPath string, paths []string) ([]string, error) {
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		rel, err := tagfilePathToRootRelative(rootPath, tagsPath, path)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, rel)
-	}
-	return out, nil
-}
-
 // findTagsFile checks for existing tags files and returns the first one found
 func findTagsFile(root string) (string, bool) {
 	// Common tags file locations in order of preference
@@ -1203,48 +1195,6 @@ func findTagsFile(root string) (string, bool) {
 	}
 
 	return "", false
-}
-
-// parseTagsFileForFiles reads a tags file and extracts unique file paths as they appear (absolute or relative to the tags file).
-func parseTagsFileForFiles(tagsPath string) ([]string, error) {
-	file, err := os.Open(tagsPath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	fileSet := make(map[string]bool)
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments (lines starting with !)
-		if line == "" || strings.HasPrefix(line, "!") {
-			continue
-		}
-
-		// Parse ctags format: symbol<tab>filename<tab>pattern
-		fields := strings.Split(line, "\t")
-		if len(fields) >= 2 {
-			filename := fields[1]
-			if filename != "" {
-				fileSet[filename] = true
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	// Convert map to slice
-	files := make([]string, 0, len(fileSet))
-	for file := range fileSet {
-		files = append(files, file)
-	}
-
-	return files, nil
 }
 
 // isGitRepo checks if the directory is a Git repository
