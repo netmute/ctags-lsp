@@ -200,6 +200,7 @@ type Server struct {
 	initialized bool
 	ctagsBin    string
 	tagfilePath string
+	languages   string
 	mu          sync.Mutex
 }
 
@@ -304,6 +305,7 @@ func main() {
 			},
 			ctagsBin:    config.ctagsBin,
 			tagfilePath: config.tagfilePath,
+			languages:   config.languages,
 		}
 
 		// Mock the JSON-RPC request for 'initialize'
@@ -331,6 +333,7 @@ func main() {
 		},
 		ctagsBin:    config.ctagsBin,
 		tagfilePath: config.tagfilePath,
+		languages:   config.languages,
 	}
 
 	// Main loop to handle LSP messages
@@ -397,6 +400,7 @@ type Config struct {
 	benchmark   bool
 	ctagsBin    string
 	tagfilePath string
+	languages   string
 }
 
 func parseFlags() *Config {
@@ -420,6 +424,14 @@ func parseFlags() *Config {
 			if i+1 < len(os.Args[1:]) {
 				config.tagfilePath = os.Args[i+2]
 			}
+		case "--languages":
+			if i+1 < len(os.Args[1:]) {
+				config.languages = os.Args[i+2]
+			}
+		default:
+			if after, ok := strings.CutPrefix(arg, "--languages="); ok {
+				config.languages = after
+			}
 		}
 	}
 	return config
@@ -436,7 +448,8 @@ Options:
   -h, --help           Show this help message
   -v, --version        Show version information
   --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
-  --tagfile <path>     Use custom tagfile path (lsp looks by default in: "tags", ".tags" or ".git/tags")
+  --tagfile <path>     Use custom tagfile (default: tries "tags", ".tags" and ".git/tags")
+  --languages <value>  Pass through language list to ctags
 `, os.Args[0])
 }
 
@@ -1087,6 +1100,14 @@ func relativePathToAbsoluteURI(rootPath, rel string) (string, error) {
 	return "file://" + filepath.ToSlash(absPath), nil
 }
 
+func (s *Server) ctagsArgs(extra ...string) []string {
+	args := []string{"--output-format=json", "--fields=+n"}
+	if s.languages != "" {
+		args = append(args, "--languages="+s.languages)
+	}
+	return append(args, extra...)
+}
+
 // scanWorkspace runs ctags on the workspace using parallel chunks for performance.
 func (s *Server) scanWorkspace() error {
 	if s.tagfilePath != "" {
@@ -1144,7 +1165,7 @@ func (s *Server) scanWorkspace() error {
 			defer wg.Done()
 
 			// run ctags with input from chunk
-			cmd := exec.Command(s.ctagsBin, "--output-format=json", "--fields=+n", "-L", "-")
+			cmd := exec.Command(s.ctagsBin, s.ctagsArgs("-L", "-")...)
 			cmd.Dir = s.rootPath
 			cmd.Stdin = strings.NewReader(strings.Join(chunk, "\n"))
 
@@ -1255,7 +1276,7 @@ func (s *Server) scanSingleFileTag(filePath string) error {
 	s.tagEntries = newEntries
 	s.mu.Unlock()
 
-	cmd := exec.Command(s.ctagsBin, "--output-format=json", "--fields=+n", filePath)
+	cmd := exec.Command(s.ctagsBin, s.ctagsArgs(filePath)...)
 	cmd.Dir = s.rootPath
 	return s.processTagsOutput(cmd)
 }
