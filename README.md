@@ -16,7 +16,7 @@ brew will automatically install dependencies for you.
 
 ```sh
 # install with brew
-brew install netmute/tap/ctags-lsp
+brew install ctags-lsp
 ```
 
 When installing with mise or go, you must install `universal-ctags` yourself ([ctags installation](https://github.com/universal-ctags/ctags?tab=readme-ov-file#the-latest-build-and-package)).
