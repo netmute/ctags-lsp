@@ -282,15 +282,15 @@ var version = "self compiled" // Populated with -X main.version
 func main() {
 	config := parseFlags(os.Args)
 
+	if config.showVersion {
+		fmt.Printf("CTags Language Server %s\n", version)
+		os.Exit(0)
+	}
+
 	// Check for ctags installation before proceeding
 	if err := checkCtagsInstallation(config.ctagsBin); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
-
-	if config.showVersion {
-		fmt.Printf("CTags Language Server %s\n", version)
-		os.Exit(0)
 	}
 
 	if config.benchmark {
