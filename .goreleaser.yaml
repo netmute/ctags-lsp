@@ -41,4 +41,7 @@ brews:
       - name: universal-ctags
 
 changelog:
-  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
