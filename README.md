@@ -33,7 +33,7 @@ go install github.com/netmute/ctags-lsp@latest
 
 ## Use with your editor
 
-Any editor with a built-in LSP client is supported. Working examples are below.
+Any editor with a built-in LSP client should work. Working examples are below.
 
 ### Neovim
 
