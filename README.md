@@ -87,9 +87,9 @@ Usage:
   ctags-lsp [options]
 
 Options:
-  -h, --help           Show this help message
-  -v, --version        Show version information
+  --help               Show this help message
+  --version            Show version information
   --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
   --tagfile <path>     Use custom tagfile (default: tries "tags", ".tags" and ".git/tags")
-  --languages <value>  Pass through language list to ctags
+  --languages <value>  Pass through language filter list to ctags
 ```

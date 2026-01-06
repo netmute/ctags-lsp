@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -279,17 +280,12 @@ var version = "self compiled" // Populated with -X main.version
 
 // Main Function
 func main() {
-	config := parseFlags()
+	config := parseFlags(os.Args)
 
 	// Check for ctags installation before proceeding
 	if err := checkCtagsInstallation(config.ctagsBin); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
-
-	if config.showHelp {
-		flagUsage()
-		os.Exit(0)
 	}
 
 	if config.showVersion {
@@ -395,7 +391,6 @@ func readMessage(reader *bufio.Reader) (RPCRequest, error) {
 
 // Config holds command-line configuration options
 type Config struct {
-	showHelp    bool
 	showVersion bool
 	benchmark   bool
 	ctagsBin    string
@@ -403,37 +398,18 @@ type Config struct {
 	languages   string
 }
 
-func parseFlags() *Config {
-	config := &Config{
-		ctagsBin: "ctags", // Default value
-	}
-	for i, arg := range os.Args[1:] {
-		switch arg {
-		case "-h", "--help":
-			config.showHelp = true
-		case "-v", "--version":
-			config.showVersion = true
-		case "--benchmark":
-			config.benchmark = true
-		case "--ctags-bin":
-			// Get the next argument as the binary name
-			if i+1 < len(os.Args[1:]) {
-				config.ctagsBin = os.Args[i+2]
-			}
-		case "--tagfile":
-			if i+1 < len(os.Args[1:]) {
-				config.tagfilePath = os.Args[i+2]
-			}
-		case "--languages":
-			if i+1 < len(os.Args[1:]) {
-				config.languages = os.Args[i+2]
-			}
-		default:
-			if after, ok := strings.CutPrefix(arg, "--languages="); ok {
-				config.languages = after
-			}
-		}
-	}
+func parseFlags(args []string) *Config {
+	config := &Config{}
+
+	flag.Usage = flagUsage
+	flag.BoolVar(&config.showVersion, "version", false, "")
+	flag.BoolVar(&config.benchmark, "benchmark", false, "")
+	flag.StringVar(&config.ctagsBin, "ctags-bin", "ctags", "")
+	flag.StringVar(&config.tagfilePath, "tagfile", "", "")
+	flag.StringVar(&config.languages, "languages", "", "")
+
+	flag.CommandLine.Parse(args[1:])
+
 	return config
 }
 
@@ -445,11 +421,11 @@ Usage:
   %s [options]
 
 Options:
-  -h, --help           Show this help message
-  -v, --version        Show version information
+  --help               Show this help message
+  --version            Show version information
   --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
   --tagfile <path>     Use custom tagfile (default: tries "tags", ".tags" and ".git/tags")
-  --languages <value>  Pass through language list to ctags
+  --languages <value>  Pass through language filter list to ctags
 `, os.Args[0])
 }
 
