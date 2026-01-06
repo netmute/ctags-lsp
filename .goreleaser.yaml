@@ -18,7 +18,7 @@ builds:
       - -s -w -X main.version={{ .Version }}
 
 archives:
-  - format: tar.gz
+  - formats: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -28,17 +28,7 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
-
-brews:
-  - repository:
-      owner: netmute
-      name: homebrew-tap
-    directory: Formula
-    homepage: "https://github.com/netmute/ctags-lsp"
-    description: "LSP implementation using universal-ctags as backend"
-    dependencies:
-      - name: universal-ctags
+        formats: zip
 
 changelog:
   filters:
