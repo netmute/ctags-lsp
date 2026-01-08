@@ -27,12 +27,18 @@ type RPCRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-// RPCResponse represents a JSON-RPC response structure
-type RPCResponse struct {
+// RPCSuccessResponse represents a successful JSON-RPC response structure
+type RPCSuccessResponse struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
+	Result  any             `json:"result"`
+}
+
+// RPCErrorResponse represents an error JSON-RPC response structure
+type RPCErrorResponse struct {
+	Jsonrpc string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Error   *RPCError       `json:"error"`
 }
 
 // RPCError represents a JSON-RPC error object
@@ -991,7 +997,7 @@ func findSymbolRangeInFile(lines []string, symbolName string, lineNumber int) Ra
 
 // sendResult sends a successful JSON-RPC response
 func sendResult(id json.RawMessage, result any) {
-	response := RPCResponse{
+	response := RPCSuccessResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
 		Result:  result,
@@ -1001,7 +1007,7 @@ func sendResult(id json.RawMessage, result any) {
 
 // sendError sends an error JSON-RPC response
 func sendError(id json.RawMessage, code int, message string, data any) {
-	response := RPCResponse{
+	response := RPCErrorResponse{
 		Jsonrpc: "2.0",
 		ID:      id,
 		Error: &RPCError{
@@ -1014,7 +1020,7 @@ func sendError(id json.RawMessage, code int, message string, data any) {
 }
 
 // sendResponse marshals and sends the JSON-RPC response with appropriate headers
-func sendResponse(resp RPCResponse) {
+func sendResponse(resp any) {
 	body, err := json.Marshal(resp)
 	if err != nil {
 		log.Printf("Error marshaling response: %v", err)
