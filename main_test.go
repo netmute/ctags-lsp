@@ -37,6 +37,18 @@ func TestParseFlagsUseTagfilePath(t *testing.T) {
 	}
 }
 
+func TestParseFlagsJobsDefaultAndOverride(t *testing.T) {
+	defaultConfig := parseFlagsForTest(t, []string{"ctags-lsp"})
+	if defaultConfig.jobs != 8 {
+		t.Fatalf("expected default jobs to be %d, got %d", 8, defaultConfig.jobs)
+	}
+
+	overrideConfig := parseFlagsForTest(t, []string{"ctags-lsp", "--jobs=3"})
+	if overrideConfig.jobs != 3 {
+		t.Fatalf("expected jobs override to be %d, got %d", 3, overrideConfig.jobs)
+	}
+}
+
 func TestRunBenchmarkUsesCWD(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "bench.go")
@@ -108,6 +120,7 @@ func newTestServer(t *testing.T) *Server {
 		ctagsBin:     config.ctagsBin,
 		tagfilePath:  config.tagfilePath,
 		languages:    config.languages,
+		jobs:         config.jobs,
 	}
 }
 

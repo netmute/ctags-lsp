@@ -89,7 +89,8 @@ Usage:
 Options:
   --help               Show this help message
   --version            Show version information
-  --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
-  --tagfile <path> Use tagfile instead of scanning
+  --ctags-bin <name>   Use custom ctags binary name (default: ctags)
+  --tagfile <path>     Use tagfile instead of scanning
   --languages <value>  Pass through language filter list to ctags
+  --jobs <value>       Number of ctags processes (default: 8)
 ```

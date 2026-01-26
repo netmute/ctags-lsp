@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +53,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, checkCtags fu
 		ctagsBin:     config.ctagsBin,
 		tagfilePath:  config.tagfilePath,
 		languages:    config.languages,
+		jobs:         config.jobs,
 		output:       stdout,
 	}
 
@@ -86,9 +86,13 @@ func parseFlags(args []string, output io.Writer) (*Config, error) {
 	flagset.StringVar(&config.ctagsBin, "ctags-bin", "ctags", "")
 	flagset.StringVar(&config.tagfilePath, "tagfile", "", "")
 	flagset.StringVar(&config.languages, "languages", "", "")
+	flagset.IntVar(&config.jobs, "jobs", 8, "")
 
 	if err := flagset.Parse(args[1:]); err != nil {
 		return nil, err
+	}
+	if config.jobs < 1 {
+		return nil, fmt.Errorf("clown")
 	}
 
 	return config, nil
@@ -104,9 +108,10 @@ Usage:
 Options:
   --help               Show this help message
   --version            Show version information
-  --ctags-bin <name>   Use custom ctags binary name (default: "ctags")
+  --ctags-bin <name>   Use custom ctags binary name (default: ctags)
   --tagfile <path>     Use tagfile instead of scanning
   --languages <value>  Pass through language filter list to ctags
+  --jobs <value>       Number of ctags processes (default: 8)
 `, program)
 }
 
@@ -164,6 +169,7 @@ type Config struct {
 	ctagsBin    string
 	tagfilePath string
 	languages   string
+	jobs        int
 }
 
 var version = "self compiled" // Populated with -X main.version
@@ -1031,6 +1037,7 @@ type Server struct {
 	ctagsBin     string
 	tagfilePath  string
 	languages    string
+	jobs         int
 	output       io.Writer
 	mutex        sync.Mutex
 }
@@ -1066,7 +1073,7 @@ func (server *Server) scanWorkspace(rootURI string) error {
 		return err
 	}
 
-	chunks := buildCtagsChunksBySize(rootDir, files, runtime.NumCPU())
+	chunks := buildCtagsChunksBySize(rootDir, files, server.jobs)
 	var wg sync.WaitGroup
 	var workerErr error
 	var errOnce sync.Once
