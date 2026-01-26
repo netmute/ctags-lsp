@@ -37,6 +37,50 @@ func TestParseFlagsUseTagfilePath(t *testing.T) {
 	}
 }
 
+func TestRunBenchmarkUsesCWD(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "bench.go")
+	source := []byte("package demo\n\ntype Bench struct{}\n")
+	if err := os.WriteFile(sourcePath, source, 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd after chdir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+
+	server := newTestServer(t)
+	server.output = io.Discard
+
+	if err := runBenchmark(server); err != nil {
+		t.Fatalf("run benchmark: %v", err)
+	}
+
+	expectedRootURI := pathToFileURI(normalizePath("", cwd))
+	if server.rootURI != expectedRootURI {
+		t.Fatalf("expected root uri %q, got %q", expectedRootURI, server.rootURI)
+	}
+	if !server.initialized {
+		t.Fatal("expected server to be initialized")
+	}
+	if len(server.tagEntries) == 0 {
+		t.Fatal("expected tag entries from benchmark scan")
+	}
+}
+
 // -- ### LSP Server ###
 // -- Tests for initialization and URI normalization
 

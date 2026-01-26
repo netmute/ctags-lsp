@@ -121,8 +121,13 @@ func checkCtagsInstallation(ctagsBin string) error {
 }
 
 func runBenchmark(server *Server) error {
+	rootDir, err := os.Getwd()
+	if err != nil {
+		// Who knows where this will be run...
+		return fmt.Errorf("failed to get current working directory: %w", err)
+	}
 	mockID := json.RawMessage(`1`)
-	mockParams := InitializeParams{RootURI: ""}
+	mockParams := InitializeParams{RootURI: pathToFileURI(normalizePath("", rootDir))}
 	mockParamsBytes, _ := json.Marshal(mockParams)
 
 	mockReq := RPCRequest{
