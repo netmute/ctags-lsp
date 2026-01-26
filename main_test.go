@@ -597,6 +597,51 @@ func TestDidOpenRootlessOutsideWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolsOrderedByPathAndLine(t *testing.T) {
+	tempDir := t.TempDir()
+	aPath := filepath.Join(tempDir, "a.go")
+	bPath := filepath.Join(tempDir, "b.go")
+
+	aURI := pathToFileURI(aPath)
+	bURI := pathToFileURI(bPath)
+
+	server := newTestServer(t)
+	server.rootURI = pathToFileURI(tempDir)
+	server.cache.content[aURI] = strings.Split("package demo\n\nfunc Alpha() {}\n\nfunc Beta() {}\n", "\n")
+	server.cache.content[bURI] = strings.Split("package demo\n\nfunc Gamma() {}\n", "\n")
+	server.tagEntries = []TagEntry{
+		{Name: "Beta", Path: aURI, Kind: "fn", Line: 5},
+		{Name: "Alpha", Path: aURI, Kind: "fn", Line: 3},
+		{Name: "Gamma", Path: bURI, Kind: "fn", Line: 3},
+	}
+
+	params := WorkspaceSymbolParams{Query: ""}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+
+	id := json.RawMessage("1")
+	req := RPCRequest{ID: &id, Params: paramsBytes}
+	var output bytes.Buffer
+	server.output = &output
+	handleWorkspaceSymbol(server, req)
+
+	resp := parseLSPResult(t, output.String())
+	var symbols []SymbolInformation
+	if err := json.Unmarshal(resp.Result, &symbols); err != nil {
+		t.Fatalf("unmarshal symbols: %v", err)
+	}
+	if len(symbols) != 3 {
+		t.Fatalf("expected 3 symbols, got %d", len(symbols))
+	}
+	got := []string{symbols[0].Name, symbols[1].Name, symbols[2].Name}
+	want := []string{"Alpha", "Beta", "Gamma"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected symbol order %v, got %v", want, got)
+	}
+}
+
 func TestDocumentSymbolsOrderedByLine(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "symbols.go")

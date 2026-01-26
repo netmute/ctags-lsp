@@ -617,6 +617,15 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 		symbols = append(symbols, symbol)
 	}
 
+	sort.SliceStable(symbols, func(i, j int) bool {
+		uriI := symbols[i].Location.URI
+		uriJ := symbols[j].Location.URI
+		if uriI != uriJ {
+			return uriI < uriJ
+		}
+		return symbols[i].Location.Range.Start.Line < symbols[j].Location.Range.Start.Line
+	})
+
 	server.sendResult(req.ID, symbols)
 }
 
