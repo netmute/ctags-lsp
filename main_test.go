@@ -887,6 +887,42 @@ func TestListWorkspaceFilesCommandOrder(t *testing.T) {
 	})
 }
 
+// -- ### Ctags to LSP ###
+// -- Tests for ctags kind to LSP symbol kind mappings
+
+func TestGetLSPSymbolKindMappings(t *testing.T) {
+	tests := map[string]int{
+		"boolean": SymbolKindBoolean,
+		"integer": SymbolKindNumber,
+		"string":  SymbolKindString,
+	}
+
+	for kind, expected := range tests {
+		got, err := GetLSPSymbolKind(kind)
+		if err != nil {
+			t.Fatalf("GetLSPSymbolKind(%q): %v", kind, err)
+		}
+		if got != expected {
+			t.Fatalf("GetLSPSymbolKind(%q): expected %d, got %d", kind, expected, got)
+		}
+	}
+}
+
+func TestGetLSPCompletionKindMappings(t *testing.T) {
+	tests := map[string]int{
+		"boolean": CompletionItemKindValue,
+		"number":  CompletionItemKindValue,
+		"string":  CompletionItemKindValue,
+	}
+
+	for kind, expected := range tests {
+		got := GetLSPCompletionKind(kind)
+		if got != expected {
+			t.Fatalf("GetLSPCompletionKind(%q): expected %d, got %d", kind, expected, got)
+		}
+	}
+}
+
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
 
