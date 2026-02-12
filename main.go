@@ -1029,12 +1029,22 @@ const messageTypeWarning = 2
 // TagEntry matches the JSON entry shape produced by Universal Ctags `--output-format=json`.
 // Paths are normalized to absolute file:// URIs once ingested.
 type TagEntry struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Pattern string `json:"pattern"`
-	Kind    string `json:"kind"`
-	Line    int    `json:"line"`
-	Scope   string `json:"scope,omitempty"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Pattern   string `json:"pattern"`
+	Language  string `json:"language,omitempty"`
+	Line      int    `json:"line"`
+	Kind      string `json:"kind"`
+	Scope     string `json:"scope,omitempty"`
+	ScopeKind string `json:"scopeKind,omitempty"`
+	Roles     string `json:"roles,omitempty"`
+	End       int    `json:"end,omitempty"`
+	Nth       int    `json:"nth,omitempty"`
+	Typeref   string `json:"typeref,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	File      bool   `json:"file,omitempty"`
+	Access    string `json:"access,omitempty"`
+	Inherits  string `json:"inherits,omitempty"`
 }
 
 type Server struct {
@@ -1272,7 +1282,7 @@ func (server *Server) runCtags(cmd *exec.Cmd, baseDir string) ([]TagEntry, error
 }
 
 func (server *Server) ctagsArgs(extra ...string) []string {
-	args := []string{"--output-format=json", "--fields=+n"}
+	args := []string{"--output-format=json", "--fields=*-E", "--extras=*-pzq"}
 	if server.languages != "" {
 		args = append(args, "--languages="+server.languages)
 	}

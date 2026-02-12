@@ -893,6 +893,98 @@ func TestBuildCtagsChunksBySize(t *testing.T) {
 	}
 }
 
+func TestCtagsArgs(t *testing.T) {
+	server := newTestServer(t)
+
+	got := server.ctagsArgs()
+	want := []string{"--output-format=json", "--fields=*-E", "--extras=*-pzq"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected args %v, got %v", want, got)
+	}
+
+	server.languages = "Go,Python"
+	got = server.ctagsArgs("-L", "-")
+	want = []string{"--output-format=json", "--fields=*-E", "--extras=*-pzq", "--languages=Go,Python", "-L", "-"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected args %v, got %v", want, got)
+	}
+}
+
+func TestScanFileParsesExtendedCtagsFields(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "sample.go")
+	if err := os.WriteFile(sourcePath, []byte("package demo\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+
+	binDir := t.TempDir()
+	ctagsScript := writeScript(t, binDir, "ctags", `cat <<'JSON'
+{"_type":"ptag","name":"JSON_OUTPUT_VERSION","path":"sample.go","pattern":"2.0","kind":"pseudo"}
+{"_type":"tag","name":"Run","path":"sample.go","pattern":"/^func Run() {}$/","language":"Go","line":3,"kind":"function","scope":"demo","scopeKind":"package","roles":"def","end":3,"nth":1,"typeref":"typename:void","signature":"()","file":true,"access":"public","inherits":"Base"}
+JSON`)
+
+	server := newTestServer(t)
+	server.ctagsBin = ctagsScript
+
+	entries, err := server.scanFile(pathToFileURI(sourcePath), tempDir)
+	if err != nil {
+		t.Fatalf("scan file: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 tag entry, got %d", len(entries))
+	}
+
+	entry := entries[0]
+	if entry.Name != "Run" {
+		t.Fatalf("expected name %q, got %q", "Run", entry.Name)
+	}
+	if entry.Path != pathToFileURI(sourcePath) {
+		t.Fatalf("expected path %q, got %q", pathToFileURI(sourcePath), entry.Path)
+	}
+	if entry.Pattern != "/^func Run() {}$/" {
+		t.Fatalf("expected pattern %q, got %q", "/^func Run() {}$/", entry.Pattern)
+	}
+	if entry.Language != "Go" {
+		t.Fatalf("expected language %q, got %q", "Go", entry.Language)
+	}
+	if entry.Line != 3 {
+		t.Fatalf("expected line %d, got %d", 3, entry.Line)
+	}
+	if entry.Kind != "function" {
+		t.Fatalf("expected kind %q, got %q", "function", entry.Kind)
+	}
+	if entry.Scope != "demo" {
+		t.Fatalf("expected scope %q, got %q", "demo", entry.Scope)
+	}
+	if entry.ScopeKind != "package" {
+		t.Fatalf("expected scopeKind %q, got %q", "package", entry.ScopeKind)
+	}
+	if entry.Roles != "def" {
+		t.Fatalf("expected roles %q, got %q", "def", entry.Roles)
+	}
+	if entry.End != 3 {
+		t.Fatalf("expected end %d, got %d", 3, entry.End)
+	}
+	if entry.Nth != 1 {
+		t.Fatalf("expected nth %d, got %d", 1, entry.Nth)
+	}
+	if entry.Typeref != "typename:void" {
+		t.Fatalf("expected typeref %q, got %q", "typename:void", entry.Typeref)
+	}
+	if entry.Signature != "()" {
+		t.Fatalf("expected signature %q, got %q", "()", entry.Signature)
+	}
+	if !entry.File {
+		t.Fatal("expected file field to be true")
+	}
+	if entry.Access != "public" {
+		t.Fatalf("expected access %q, got %q", "public", entry.Access)
+	}
+	if entry.Inherits != "Base" {
+		t.Fatalf("expected inherits %q, got %q", "Base", entry.Inherits)
+	}
+}
+
 func TestListWorkspaceFilesCommandOrder(t *testing.T) {
 	t.Run("fd wins", func(t *testing.T) {
 		workspaceRoot := t.TempDir()
