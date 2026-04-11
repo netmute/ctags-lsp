@@ -1,3 +1,6 @@
+> **Note:** This is documentation for the development version!  
+> The docs for the last release version are [here](https://github.com/netmute/ctags-lsp/blob/v0.11.0/README.md).
+
 # CTags Language Server
 
 A Language Server Protocol (LSP) implementation using `universal-ctags` as backend, supporting 100+ languages.
