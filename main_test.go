@@ -688,6 +688,52 @@ func TestDocumentSymbolsOrderedByLine(t *testing.T) {
 	}
 }
 
+func TestCompletionEmptyItemsReturnsArrayNotNull(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "empty.go")
+	fileURI := pathToFileURI(sourcePath)
+
+	server := newTestServer(t)
+	server.rootURI = pathToFileURI(tempDir)
+	// Buffer with a word at the cursor so handleCompletion enters the main
+	// path (rather than the early-return for "no current word").
+	server.cache.content[fileURI] = strings.Split("xyz\n", "\n")
+	// No tags: nothing can match the loop, so the result slice stays empty.
+	server.tagEntries = nil
+
+	params := CompletionParams{
+		TextDocument: PositionParams{URI: fileURI},
+		Position:     Position{Line: 0, Character: 3},
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+
+	id := json.RawMessage("1")
+	req := RPCRequest{ID: &id, Params: paramsBytes}
+	var output bytes.Buffer
+	server.output = &output
+	handleCompletion(server, req)
+
+	raw := output.String()
+	if strings.Contains(raw, `"items":null`) {
+		t.Fatalf("CompletionList.items must be `[]`, never `null` (LSP spec):\n%s", raw)
+	}
+	if !strings.Contains(raw, `"items":[]`) {
+		t.Fatalf("expected `\"items\":[]` in response, got:\n%s", raw)
+	}
+
+	resp := parseLSPResult(t, raw)
+	var list CompletionList
+	if err := json.Unmarshal(resp.Result, &list); err != nil {
+		t.Fatalf("unmarshal CompletionList: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("expected empty items, got %d", len(list.Items))
+	}
+}
+
 func TestNormalizePath(t *testing.T) {
 	baseDir := t.TempDir()
 
