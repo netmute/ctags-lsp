@@ -462,7 +462,7 @@ func handleCompletion(server *Server, req RPCRequest) {
 		}
 	}
 
-	var items []CompletionItem
+	items := []CompletionItem{}
 	seenItems := make(map[string]bool)
 
 	server.mutex.Lock()
@@ -582,7 +582,7 @@ func handleWorkspaceSymbol(server *Server, req RPCRequest) {
 	}
 
 	query := params.Query
-	var symbols []SymbolInformation
+	symbols := []SymbolInformation{}
 
 	server.mutex.Lock()
 	defer server.mutex.Unlock()
@@ -645,7 +645,7 @@ func handleDocumentSymbol(server *Server, req RPCRequest) {
 	server.mutex.Lock()
 	defer server.mutex.Unlock()
 
-	var symbols []SymbolInformation
+	symbols := []SymbolInformation{}
 
 	tagEntries := server.tagEntries
 	if server.isRootlessFile(normalizedURI) {
